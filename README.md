@@ -26,7 +26,7 @@ GROQ_API_KEY=your-rotated-groq-key
 GEMINI_API_KEY=your-rotated-gemini-key
 ```
 
-If both keys are configured, Groq is used by default. Set `AI_PROVIDER=gemini` or `AI_PROVIDER=groq` to choose explicitly. Optional model overrides are `GROQ_MODEL` and `GEMINI_MODEL`. Restart the development server after changing environment variables. For Vercel, add the same variables under the project's Environment Variables settings and redeploy.
+If both keys are configured, Groq is tried first and Gemini is used as a fallback. Set `AI_PROVIDER=gemini` to try Gemini first. Optional model overrides are `GROQ_MODEL` and `GEMINI_MODEL`. Restart the development server after changing environment variables. For Vercel, add the same variables under the project's Environment Variables settings and redeploy.
 
 ## Deploy to Vercel
 

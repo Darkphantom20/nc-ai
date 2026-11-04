@@ -67,6 +67,20 @@ function parseGeneratedFields(value: unknown): Record<FieldKey, string> | null {
   return result;
 }
 
+async function providerError(response: Response, provider: Provider): Promise<Error> {
+  const body = await response.text();
+  let detail = '';
+  try {
+    const parsed: unknown = JSON.parse(body);
+    if (isRecord(parsed) && isRecord(parsed.error) && typeof parsed.error.message === 'string') {
+      detail = parsed.error.message;
+    }
+  } catch {
+    detail = body.slice(0, 300);
+  }
+  return new Error(`${provider === 'groq' ? 'Groq' : 'Gemini'} returned HTTP ${response.status}${detail ? `: ${detail.slice(0, 300)}` : '.'}`);
+}
+
 async function requestGroq(prompt: string, apiKey: string): Promise<string> {
   const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
@@ -75,7 +89,7 @@ async function requestGroq(prompt: string, apiKey: string): Promise<string> {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
+      model: process.env.GROQ_MODEL || 'openai/gpt-oss-20b',
       temperature: 0.4,
       response_format: { type: 'json_object' },
       messages: [
@@ -86,7 +100,7 @@ async function requestGroq(prompt: string, apiKey: string): Promise<string> {
     signal: AbortSignal.timeout(55_000),
   });
 
-  if (!response.ok) throw new Error(`Groq returned HTTP ${response.status}.`);
+  if (!response.ok) throw await providerError(response, 'groq');
   const result: unknown = await response.json();
   if (!isRecord(result) || !Array.isArray(result.choices)) {
     throw new Error('Groq returned an unexpected response.');
@@ -99,13 +113,12 @@ async function requestGroq(prompt: string, apiKey: string): Promise<string> {
 }
 
 async function requestGemini(prompt: string, apiKey: string): Promise<string> {
-  const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+  const model = process.env.GEMINI_MODEL || 'gemini-flash-latest';
   const url = new URL(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`);
-  url.searchParams.set('key', apiKey);
 
   const response = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'X-goog-api-key': apiKey },
     body: JSON.stringify({
       contents: [{ parts: [{ text: prompt }] }],
       generationConfig: { responseMimeType: 'application/json', temperature: 0.4 },
@@ -113,7 +126,7 @@ async function requestGemini(prompt: string, apiKey: string): Promise<string> {
     signal: AbortSignal.timeout(55_000),
   });
 
-  if (!response.ok) throw new Error(`Gemini returned HTTP ${response.status}.`);
+  if (!response.ok) throw await providerError(response, 'gemini');
   const result: unknown = await response.json();
   if (!isRecord(result) || !Array.isArray(result.candidates)) {
     throw new Error('Gemini returned an unexpected response.');
@@ -148,21 +161,22 @@ export async function POST(request: Request) {
   }
 
   const configuredProvider = (process.env.AI_PROVIDER || '').trim().toLowerCase();
-  const provider: Provider | null = configuredProvider
-    ? configuredProvider === 'groq' || configuredProvider === 'gemini' ? configuredProvider : null
-    : process.env.GROQ_API_KEY ? 'groq' : process.env.GEMINI_API_KEY ? 'gemini' : null;
-
-  if (!provider) {
+  if (configuredProvider && configuredProvider !== 'groq' && configuredProvider !== 'gemini') {
     return Response.json({
-      error: configuredProvider
-        ? 'AI_PROVIDER must be set to "groq" or "gemini".'
-        : 'Configure GROQ_API_KEY or GEMINI_API_KEY on the server to enable AI drafting.',
-    }, { status: configuredProvider ? 500 : 503 });
+      error: 'AI_PROVIDER must be set to "groq" or "gemini".',
+    }, { status: 500 });
   }
 
-  const apiKey = provider === 'groq' ? process.env.GROQ_API_KEY : process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    return Response.json({ error: `AI_PROVIDER is "${provider}", but its API key is not configured on the server.` }, { status: 503 });
+  const providerOrder: Provider[] = configuredProvider === 'gemini'
+    ? ['gemini', 'groq']
+    : ['groq', 'gemini'];
+  const availableProviders = providerOrder.filter((provider) => Boolean(
+    provider === 'groq' ? process.env.GROQ_API_KEY : process.env.GEMINI_API_KEY
+  ));
+  if (availableProviders.length === 0) {
+    return Response.json({
+      error: 'Configure GROQ_API_KEY or GEMINI_API_KEY on the server to enable AI drafting.',
+    }, { status: 503 });
   }
 
   const reportDetails = collectDetails(payload.report);
@@ -203,36 +217,38 @@ export async function POST(request: Request) {
     JSON.stringify({ report: reportContext, schoolPlacement }),
   ].join('\n\n');
 
-  try {
-    const content = provider === 'groq'
-      ? await requestGroq(prompt, apiKey)
-      : await requestGemini(prompt, apiKey);
-    const generated: unknown = parseJsonContent(content);
-    if (!isRecord(generated)) throw new Error('The AI response was not a JSON object.');
+  const providerErrors: string[] = [];
+  let timedOut = false;
+  for (const provider of availableProviders) {
+    try {
+      const apiKey = provider === 'groq' ? process.env.GROQ_API_KEY : process.env.GEMINI_API_KEY;
+      if (!apiKey) continue;
+      const content = provider === 'groq'
+        ? await requestGroq(prompt, apiKey)
+        : await requestGemini(prompt, apiKey);
+      const generated: unknown = parseJsonContent(content);
+      if (!isRecord(generated)) throw new Error('The AI response was not a JSON object.');
 
-    const report = parseGeneratedFields(generated.report);
-    if (!report) throw new Error('The AI response did not include all report fields.');
-    const result: { report: Record<FieldKey, string>; schoolPlacement?: Record<FieldKey, string> } = { report };
+      const report = parseGeneratedFields(generated.report);
+      if (!report) throw new Error('The AI response did not include all report fields.');
+      const result: { report: Record<FieldKey, string>; schoolPlacement?: Record<FieldKey, string> } = { report };
 
-    if (schoolPlacementEnabled) {
-      const schoolFields = parseGeneratedFields(generated.schoolPlacement);
-      if (!schoolFields) throw new Error('The AI response did not include all school placement fields.');
-      result.schoolPlacement = schoolFields;
+      if (schoolPlacementEnabled) {
+        const schoolFields = parseGeneratedFields(generated.schoolPlacement);
+        if (!schoolFields) throw new Error('The AI response did not include all school placement fields.');
+        result.schoolPlacement = schoolFields;
+      }
+
+      return Response.json(result);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : 'Unknown provider error';
+      timedOut ||= error instanceof Error && error.name === 'TimeoutError';
+      providerErrors.push(`${provider}: ${reason}`);
+      console.error('AI draft provider failed', { provider, reason });
     }
-
-    return Response.json(result);
-  } catch (error) {
-    if (error instanceof Error && error.name === 'TimeoutError') {
-      return Response.json({ error: 'The AI request timed out. Try again or check the provider status.' }, { status: 504 });
-    }
-    console.error('AI draft generation failed', {
-      provider,
-      reason: error instanceof Error ? error.message : 'Unknown provider error',
-    });
-    return Response.json({
-      error: error instanceof Error
-        ? `${error.message} Check the configured provider, model, key, and quota.`
-        : 'AI draft generation failed. Check the configured provider, key, and quota.',
-    }, { status: 502 });
   }
+
+  return Response.json({
+    error: `AI drafting failed for all configured providers. ${providerErrors.join(' ')}`,
+  }, { status: timedOut ? 504 : 502 });
 }
