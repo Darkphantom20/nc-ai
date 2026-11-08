@@ -264,6 +264,14 @@ type NarrativeDraft = {
   title: string;
   updatedAt: string;
   form: NarrativeForm;
+  importedDocument?: ImportedNarrativeDocument;
+};
+
+type ImportedNarrativeDocument = {
+  fileName: string;
+  blob: Blob;
+  extractedText: string;
+  wordCount: number;
 };
 
 type StoredNarrativeDraft = {
@@ -271,6 +279,7 @@ type StoredNarrativeDraft = {
   title: string;
   updatedAt?: string;
   form: Record<string, unknown>;
+  importedDocument?: ImportedNarrativeDocument;
 };
 
 const draftsStorageKey = 'narrativeReportDrafts';
@@ -293,6 +302,14 @@ function isStoredNarrativeDraft(value: unknown): value is StoredNarrativeDraft {
     && typeof value.id === 'string'
     && typeof value.title === 'string'
     && isRecord(value.form);
+}
+
+function isImportedNarrativeDocument(value: unknown): value is ImportedNarrativeDocument {
+  return isRecord(value)
+    && typeof value.fileName === 'string'
+    && value.blob instanceof Blob
+    && typeof value.extractedText === 'string'
+    && typeof value.wordCount === 'number';
 }
 
 function isStoredNarrativeCollection(
@@ -589,6 +606,56 @@ async function parseDailyJournalDocx(file: File): Promise<ParsedJournalImport> {
   };
 }
 
+async function readNarrativeDocx(file: File): Promise<ImportedNarrativeDocument> {
+  if (!file.name.toLowerCase().endsWith('.docx')) {
+    throw new Error('Choose a Word .docx file.');
+  }
+  if (file.size > 25 * 1024 * 1024) {
+    throw new Error('The DOCX file is larger than 25 MB. Choose a smaller file.');
+  }
+
+  const { default: JSZip } = await import('jszip');
+  const fileData = await file.arrayBuffer();
+  const archive = await JSZip.loadAsync(fileData);
+  const documentEntry = archive.file('word/document.xml');
+  if (!documentEntry) {
+    throw new Error('This DOCX does not contain a readable Word document.');
+  }
+
+  const parser = new DOMParser();
+  const documentParts = Object.keys(archive.files).filter((path) => (
+    /^word\/(?:document|header\d*|footer\d*|footnotes|endnotes)\.xml$/.test(path)
+  ));
+  const extractedParts = await Promise.all(documentParts.map(async (path) => {
+    const entry = archive.file(path);
+    if (!entry) return '';
+    const xml = parser.parseFromString(await entry.async('string'), 'application/xml');
+    if (xml.getElementsByTagName('parsererror').length > 0) {
+      throw new Error('The DOCX contains invalid document data.');
+    }
+
+    return Array.from(xml.getElementsByTagNameNS(wordProcessingNamespace, 'p'))
+      .map((paragraph) => Array.from(paragraph.getElementsByTagNameNS(wordProcessingNamespace, 't'))
+        .map((textNode) => textNode.textContent || '')
+        .join(''))
+      .filter(Boolean)
+      .join('\n');
+  }));
+  const extractedText = extractedParts.filter(Boolean).join('\n\n').trim();
+  if (!extractedText) {
+    throw new Error('No readable text was found in this DOCX.');
+  }
+
+  return {
+    fileName: file.name,
+    blob: new Blob([fileData], {
+      type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    }),
+    extractedText,
+    wordCount: extractedText.match(/\S+/g)?.length || 0
+  };
+}
+
 const fieldClass =
   'mt-2.5 w-full rounded-xl border border-slate-700 bg-slate-950/80 px-3.5 py-3 text-sm text-slate-100 placeholder:text-slate-500 focus:border-cyan-400 focus:outline-none focus:ring-2 focus:ring-cyan-500/30 sm:rounded-2xl sm:px-4 sm:py-3.5 sm:text-base';
 
@@ -773,6 +840,12 @@ export default function Home() {
   const [activeDraftId, setActiveDraftId] = useState('');
   const [showNewDraftDialog, setShowNewDraftDialog] = useState(false);
   const [newDraftTitle, setNewDraftTitle] = useState('');
+  const [pendingNarrativeImport, setPendingNarrativeImport] = useState<ImportedNarrativeDocument | null>(null);
+  const [previewingImportedDocument, setPreviewingImportedDocument] = useState<ImportedNarrativeDocument | null>(null);
+  const [importedDocumentRendering, setImportedDocumentRendering] = useState(false);
+  const [importedDocumentPreviewError, setImportedDocumentPreviewError] = useState('');
+  const [narrativeImportError, setNarrativeImportError] = useState('');
+  const [isImportingNarrative, setIsImportingNarrative] = useState(false);
   const [pendingJournalImport, setPendingJournalImport] = useState<ParsedJournalImport | null>(null);
   const [journalImportError, setJournalImportError] = useState('');
   const [isImportingJournal, setIsImportingJournal] = useState(false);
@@ -803,6 +876,8 @@ export default function Home() {
   const previewRequestRef = useRef<AbortController | null>(null);
   const previewCacheRef = useRef<{ key: string; blob: Blob } | null>(null);
   const draftSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const narrativeImportFileRef = useRef<HTMLInputElement>(null);
+  const importedDocumentPreviewRef = useRef<HTMLDivElement>(null);
   const journalImportFileRef = useRef<HTMLInputElement>(null);
 
   const isMobileAccomplishmentEditorOpen = mobileAccomplishmentEditor !== null;
@@ -846,7 +921,10 @@ export default function Home() {
             id: draft.id,
             title: draft.title,
             updatedAt: draft.updatedAt || new Date().toISOString(),
-            form: mergeNarrativeForm(draft.form)
+            form: mergeNarrativeForm(draft.form),
+            ...(isImportedNarrativeDocument(draft.importedDocument)
+              ? { importedDocument: draft.importedDocument }
+              : {})
           }));
           const requestedActiveId = savedCollection.activeDraftId;
           const restoredActiveId = typeof requestedActiveId === 'string'
@@ -868,7 +946,10 @@ export default function Home() {
             id: draft.id,
             title: draft.title,
             updatedAt: draft.updatedAt || new Date().toISOString(),
-            form: mergeNarrativeForm(draft.form)
+            form: mergeNarrativeForm(draft.form),
+            ...(isImportedNarrativeDocument(draft.importedDocument)
+              ? { importedDocument: draft.importedDocument }
+              : {})
           }));
           const requestedActiveId = parsedDrafts.activeDraftId;
           const restoredActiveId = typeof requestedActiveId === 'string'
@@ -968,10 +1049,61 @@ export default function Home() {
   }, [drafts, activeDraftId, isMounted]);
 
   const activeDraft = drafts.find((draft) => draft.id === activeDraftId);
+  const importedDocumentToPreview = pendingNarrativeImport || previewingImportedDocument;
 
   const openNewDraftDialog = () => {
     setNewDraftTitle(`Narrative ${drafts.length + 1}`);
+    setNarrativeImportError('');
     setShowNewDraftDialog(true);
+  };
+
+  const handleNarrativeDocxUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+
+    setNarrativeImportError('');
+    setIsImportingNarrative(true);
+    setStatus('Reading complete narrative DOCX...');
+    try {
+      const importedDocument = await readNarrativeDocx(file);
+      setNewDraftTitle(file.name.replace(/\.docx$/i, '') || `Narrative ${drafts.length + 1}`);
+      setPendingNarrativeImport(importedDocument);
+      setPreviewingImportedDocument(null);
+      setImportedDocumentPreviewError('');
+      setStatus(`Read ${importedDocument.wordCount.toLocaleString()} words from DOCX`);
+    } catch (error) {
+      console.error('Error importing narrative DOCX:', error);
+      const message = error instanceof Error ? error.message : 'Could not read the DOCX file.';
+      setNarrativeImportError(message);
+      setStatus('Narrative import failed');
+    } finally {
+      setIsImportingNarrative(false);
+    }
+  };
+
+  const createNarrativeFromDocx = () => {
+    if (!pendingNarrativeImport) return;
+    const importedDocument = pendingNarrativeImport;
+    const newDraft: NarrativeDraft = {
+      id: createNarrativeId(),
+      title: newDraftTitle.trim() || importedDocument.fileName.replace(/\.docx$/i, ''),
+      updatedAt: new Date().toISOString(),
+      form: createDefaultNarrativeForm(),
+      importedDocument
+    };
+    setDrafts((currentDrafts) => [
+      ...currentDrafts.map((draft) => (
+        draft.id === activeDraftId ? { ...draft, form, updatedAt: new Date().toISOString() } : draft
+      )),
+      newDraft
+    ]);
+    setActiveDraftId(newDraft.id);
+    setForm(newDraft.form);
+    setShowNewDraftDialog(false);
+    setPendingNarrativeImport(null);
+    setPreviewingImportedDocument(importedDocument);
+    setStatus('Narrative created from imported DOCX');
   };
 
   const createNarrative = () => {
@@ -1562,6 +1694,43 @@ export default function Home() {
     };
   }, [previewBlob, showPreview]);
 
+  useEffect(() => {
+    const container = importedDocumentPreviewRef.current;
+    if (!importedDocumentToPreview || !container) return;
+
+    let cancelled = false;
+    container.replaceChildren();
+    setImportedDocumentRendering(true);
+    setImportedDocumentPreviewError('');
+
+    void import('docx-preview')
+      .then(({ renderAsync }) => renderAsync(importedDocumentToPreview.blob, container, container, {
+        className: 'report-docx',
+        breakPages: true,
+        ignoreWidth: false,
+        ignoreHeight: false,
+        ignoreLastRenderedPageBreak: false,
+        renderHeaders: true,
+        renderFooters: true,
+        useBase64URL: true,
+      }))
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setImportedDocumentPreviewError(
+            error instanceof Error ? error.message : 'Could not render the imported DOCX preview.'
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setImportedDocumentRendering(false);
+      });
+
+    return () => {
+      cancelled = true;
+      container.replaceChildren();
+    };
+  }, [importedDocumentToPreview]);
+
   const handleGenerate = async () => {
     setLoading(true);
     setStatus('Generating DOCX...');
@@ -1834,6 +2003,14 @@ export default function Home() {
           <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 p-5 shadow-2xl sm:p-6">
             <h2 id="new-narrative-title" className="text-xl font-bold text-white">Create a new narrative</h2>
             <p className="mt-2 text-sm text-slate-300">Your current report will be saved so you can return to it later.</p>
+            <input
+              ref={narrativeImportFileRef}
+              type="file"
+              accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              onChange={handleNarrativeDocxUpload}
+              className="hidden"
+              aria-label="Choose a complete narrative DOCX file"
+            />
             <label className="mt-5 block text-sm font-medium text-slate-200">
               Narrative name
               <input
@@ -1841,12 +2018,29 @@ export default function Home() {
                 value={newDraftTitle}
                 onChange={(event) => setNewDraftTitle(event.target.value)}
                 onKeyDown={(event) => {
-                  if (event.key === 'Enter') createNarrative();
+                  if (event.key === 'Enter' && !pendingNarrativeImport && !isImportingNarrative) createNarrative();
                 }}
                 className={fieldClass}
                 placeholder="For example, Office OJT"
               />
             </label>
+            {narrativeImportError && (
+              <p role="alert" className="mt-4 rounded-lg border border-rose-400/30 bg-rose-950/40 p-3 text-sm text-rose-200">
+                {narrativeImportError}
+              </p>
+            )}
+            <button
+              type="button"
+              onClick={() => narrativeImportFileRef.current?.click()}
+              disabled={isImportingNarrative}
+              className="mt-5 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-cyan-500/40 bg-cyan-500/10 px-4 text-sm font-semibold text-cyan-200 transition hover:bg-cyan-500/20 disabled:cursor-wait disabled:opacity-60"
+            >
+              <FileText size={17} aria-hidden="true" />
+              {isImportingNarrative ? 'Reading DOCX...' : 'Import complete narrative DOCX'}
+            </button>
+            <p className="mt-2 text-xs leading-5 text-slate-400">
+              Import the full report, including its cover, acknowledgement, contents, appendices, images, and page layout. You can review every page before creating the narrative.
+            </p>
             <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
               <button
                 type="button"
@@ -1858,11 +2052,97 @@ export default function Home() {
               <button
                 type="button"
                 onClick={createNarrative}
+                disabled={isImportingNarrative || pendingNarrativeImport !== null}
                 className="min-h-11 rounded-xl bg-cyan-500 px-4 text-sm font-bold text-slate-950"
               >
                 Create narrative
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {importedDocumentToPreview && (
+        <div
+          className="fixed inset-0 z-[1500] flex items-center justify-center bg-slate-950/85 p-2 backdrop-blur-sm sm:p-6"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="narrative-docx-preview-title"
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') {
+              setPendingNarrativeImport(null);
+              setPreviewingImportedDocument(null);
+            }
+          }}
+        >
+          <div className="flex max-h-[calc(100dvh-1rem)] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl sm:max-h-[calc(100dvh-3rem)] sm:rounded-3xl">
+            <header className="border-b border-slate-800 p-4 sm:p-6">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-300">Full Narrative DOCX Preview</p>
+              <h2 id="narrative-docx-preview-title" className="mt-1 break-words text-xl font-bold text-white">
+                {importedDocumentToPreview.fileName}
+              </h2>
+              <p className="mt-2 text-sm text-slate-300">
+                Read {importedDocumentToPreview.wordCount.toLocaleString()} words. Scroll through the rendered document to review the cover page, acknowledgement, contents, report sections, images, and appendices.
+              </p>
+              <p className="mt-2 text-xs leading-5 text-slate-400">
+                The original DOCX is preserved with this narrative for preview. Its contents are not automatically mapped into the editable report fields.
+              </p>
+              {pendingNarrativeImport && (
+                <label className="mt-3 block text-xs text-slate-300">
+                  Narrative name
+                  <input
+                    value={newDraftTitle}
+                    onChange={(event) => setNewDraftTitle(event.target.value)}
+                    className={fieldClass}
+                    aria-label="Name for imported narrative"
+                  />
+                </label>
+              )}
+            </header>
+
+            <div className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-5" aria-busy={importedDocumentRendering}>
+              {importedDocumentRendering && (
+                <p className="mb-3 rounded-lg bg-slate-950/90 px-4 py-2 text-center text-xs font-medium text-cyan-200">
+                  Rendering all document pages...
+                </p>
+              )}
+              {importedDocumentPreviewError && (
+                <p role="alert" className="mb-3 rounded-lg border border-rose-400/30 bg-rose-950/70 p-4 text-sm text-rose-200">
+                  {importedDocumentPreviewError}
+                </p>
+              )}
+              <div ref={importedDocumentPreviewRef} className="report-preview-pages" />
+              <details className="mt-5 rounded-xl border border-slate-700 bg-slate-950/70 p-4">
+                <summary className="cursor-pointer text-sm font-semibold text-cyan-200">
+                  Read extracted document text ({importedDocumentToPreview.wordCount.toLocaleString()} words)
+                </summary>
+                <pre className="mt-4 max-h-80 overflow-auto whitespace-pre-wrap break-words text-xs leading-6 text-slate-300">
+                  {importedDocumentToPreview.extractedText}
+                </pre>
+              </details>
+            </div>
+
+            <footer className="flex flex-col-reverse gap-3 border-t border-slate-800 p-4 sm:flex-row sm:justify-end sm:p-5">
+              <button
+                type="button"
+                onClick={() => {
+                  setPendingNarrativeImport(null);
+                  setPreviewingImportedDocument(null);
+                }}
+                className="min-h-11 rounded-xl border border-slate-700 px-4 text-sm font-semibold text-slate-200"
+              >
+                {pendingNarrativeImport ? 'Cancel import' : 'Close preview'}
+              </button>
+              {pendingNarrativeImport && (
+                <button
+                  type="button"
+                  onClick={createNarrativeFromDocx}
+                  className="min-h-11 rounded-xl bg-cyan-500 px-4 text-sm font-bold text-slate-950"
+                >
+                  Create narrative from DOCX
+                </button>
+              )}
+            </footer>
           </div>
         </div>
       )}
@@ -2182,6 +2462,18 @@ export default function Home() {
           >
             + New narrative
           </button>
+          {activeDraft?.importedDocument && (
+            <button
+              type="button"
+              onClick={() => {
+                setPreviewingImportedDocument(activeDraft.importedDocument || null);
+                setImportedDocumentPreviewError('');
+              }}
+              className="min-h-11 shrink-0 rounded-xl border border-cyan-500/40 bg-cyan-500/10 px-4 text-sm font-semibold text-cyan-200 transition hover:bg-cyan-500/20"
+            >
+              View imported DOCX
+            </button>
+          )}
         </section>
 
         <section className="hidden gap-4 sm:grid sm:grid-cols-3 sm:gap-6">
