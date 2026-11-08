@@ -90,11 +90,25 @@ function responseValidationError(
   outputUnit: 'sentences' | 'paragraphs',
   outputCount: number,
   acknowledgementRequest: boolean,
+  issueRequest: boolean,
   factualEvidence: string,
 ): string {
   if (!text) return `${providerName} returned no text.`;
   if (!matchesRequestedLength(text, outputUnit, outputCount)) {
     return `${providerName} did not return exactly ${outputCount} ${outputUnit}.`;
+  }
+  if (issueRequest && outputUnit === 'paragraphs' && !matchesRequestedLength(text, 'sentences', outputCount)) {
+    return `${providerName} added unsupported extra sentences to the issue description.`;
+  }
+  if (issueRequest) {
+    const recommendationPattern = /\b(?:to address (?:this|the) challenge|recommended approach|recommendation|should (?:create|develop|implement|use|establish)|could (?:create|develop|implement|use|establish))\b/i;
+    if (recommendationPattern.test(text) && !recommendationPattern.test(factualEvidence)) {
+      return `${providerName} added a recommendation that is not supported in the issue details.`;
+    }
+    const personalExperiencePattern = /\b(?:I|we)\s+(?:encountered|faced|experienced|struggled|had difficulty)\b/i;
+    if (personalExperiencePattern.test(text) && !personalExperiencePattern.test(factualEvidence)) {
+      return `${providerName} described an undocumented personal experience as fact.`;
+    }
   }
   if (acknowledgementRequest && hasUnsupportedAcknowledgementClaims(text, factualEvidence)) {
     return `${providerName} included acknowledgement claims not supported by the supplied details.`;
@@ -319,6 +333,7 @@ export async function POST(request: Request) {
                 outputUnit,
                 outputCount,
                 acknowledgementRequest,
+                issueRequest,
                 factualEvidence,
               );
               if (!validationError) {
@@ -384,6 +399,7 @@ export async function POST(request: Request) {
                 outputUnit,
                 outputCount,
                 acknowledgementRequest,
+                issueRequest,
                 factualEvidence,
               );
               if (!validationError) {
@@ -442,6 +458,7 @@ export async function POST(request: Request) {
                 outputUnit,
                 outputCount,
                 acknowledgementRequest,
+                issueRequest,
                 factualEvidence,
               );
               if (!validationError) {
@@ -496,6 +513,7 @@ export async function POST(request: Request) {
                 outputUnit,
                 outputCount,
                 acknowledgementRequest,
+                issueRequest,
                 factualEvidence,
               );
               if (!validationError) {
