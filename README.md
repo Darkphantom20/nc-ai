@@ -18,7 +18,7 @@ npm run dev
 
 Use **Draft with AI** to create editable text for the narrative report fields. Drafts are reviewed before they are applied to the form. The app supports Groq and Gemini through server-side API routes; it never sends provider keys to the browser.
 
-Use **Generate with AI** in an individual section editor to create or revise that section. Add an optional focus, generate once, review the result in the editor, and choose **Save** to apply it. AI requests send text-only report context and journal entries; attached images and document data are excluded. Generation is constrained to facts in the report; when required information is missing, the model is instructed to say so rather than invent it. Always review AI-generated text for accuracy before including it in a final report.
+Use **Generate with AI** in an individual section editor to create or revise that section. Add an optional focus, choose whether the result should contain 1–10 sentences or paragraphs, generate once, review the result in the editor, and choose **Save** to apply it. Generation uses the current section plus related user-edited report fields and journal entries for consistency; unchanged sample text, attachments, and unrelated default data are excluded. Weekly narratives use only the selected week's entries. The AI is instructed to follow the user's actual field and duties rather than assuming an IT placement, and to ask for details instead of guessing. Always review AI-generated text for accuracy before including it in a final report.
 
 Add one provider key to `.env.local` (do not commit this file):
 

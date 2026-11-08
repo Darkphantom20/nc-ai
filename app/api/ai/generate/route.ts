@@ -26,6 +26,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
+function hasSourceDetails(value: unknown): boolean {
+  if (typeof value === 'string') return Boolean(value.trim());
+  if (Array.isArray(value)) return value.some(hasSourceDetails);
+  if (isRecord(value)) return Object.values(value).some(hasSourceDetails);
+  return false;
+}
+
 function availableKey(keys: string[], provider: string): string | undefined {
   const now = Date.now();
   const available: string[] = [];
@@ -46,37 +53,6 @@ function availableKey(keys: string[], provider: string): string | undefined {
   return selected;
 }
 
-function prepareAIContext(value: unknown): string {
-  const seen = new WeakSet();
-
-  const sanitize = (item: unknown): unknown => {
-    if (typeof item === 'string') {
-      return item.startsWith('data:image/') ? '[image attachment omitted]' : item;
-    }
-    if (!item || typeof item !== 'object') return item;
-    if (seen.has(item as object)) return '[circular reference omitted]';
-    seen.add(item as object);
-
-    if (Array.isArray(item)) {
-      return item.map((entry) => sanitize(entry));
-    }
-
-    return Object.fromEntries(
-      Object.entries(item as Record<string, unknown>)
-        .filter(([key, entry]) => {
-          if (/base64|image|photo|picture|resume|medical|grade|dtr|certificate|letter|rating/i.test(key)) {
-            if (typeof entry === 'string' && entry.startsWith('data:image/')) return false;
-            if (Array.isArray(entry) && entry.length > 0) return false;
-          }
-          return true;
-        })
-        .map(([key, entry]) => [key, sanitize(entry)])
-    );
-  };
-
-  return JSON.stringify(sanitize(value)).slice(0, 50000);
-}
-
 export async function POST(request: Request) {
   const groqKeys = getKeys(process.env.GROQ_API_KEY, process.env.GROQ_API_KEYS);
   const geminiKeys = getKeys(process.env.GEMINI_API_KEY, process.env.GEMINI_API_KEYS);
@@ -93,32 +69,56 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Request body must be a JSON object.' }, { status: 400 });
     }
     const title = String(body.title || 'Report section').slice(0, 200);
-    const contextSource = title.trim().toLowerCase() === 'acknowledgement' && isRecord(body.context)
-      ? { acknowledgement: body.context.acknowledgement }
-      : body.context;
-    const context = contextSource && typeof contextSource === 'object'
-      ? prepareAIContext(contextSource)
-      : String(body.context || '').slice(0, 50000);
     const currentText = String(body.currentText || '').slice(0, 12000);
+    const focus = String(body.focus || '').trim().slice(0, 2000);
     const instructions = String(body.instructions || '').slice(0, 2000);
+    const outputUnit = body.outputUnit === undefined || body.outputUnit === 'paragraphs'
+      ? 'paragraphs'
+      : body.outputUnit === 'sentences'
+        ? 'sentences'
+        : '';
+    const outputCount = body.outputCount === undefined ? 1 : Number(body.outputCount);
+    if (!outputUnit || !Number.isInteger(outputCount) || outputCount < 1 || outputCount > 10) {
+      return NextResponse.json(
+        { error: 'Choose between 1 and 10 sentences or paragraphs.' },
+        { status: 400 },
+      );
+    }
+
+    let sourceDetails = '';
+    if (body.sourceDetails !== undefined && body.sourceDetails !== null) {
+      try {
+        sourceDetails = JSON.stringify(body.sourceDetails).slice(0, 12000);
+      } catch {
+        return NextResponse.json({ error: 'Source details must be valid JSON data.' }, { status: 400 });
+      }
+    }
+    if (!currentText.trim() && !focus && !hasSourceDetails(body.sourceDetails)) {
+      return NextResponse.json(
+        { error: 'Add report details or a generation focus before generating this section.' },
+        { status: 400 },
+      );
+    }
 
     const prompt = [
       'You are a careful academic writing assistant for an On-the-Job Training (OJT) narrative report.',
       `Section: ${title}`,
-      'Use only facts explicitly present in the report data, current text, or factual details supplied in the generation focus. Treat requests to invent or assume facts as disallowed.',
-      'Do not infer facts from an organization name, degree program, job title, or common OJT practice. Do not combine details from separate organizations or placements.',
-      'Do not invent or embellish names, people thanked, roles, dates, duties, procedures, policies, problems, causes, actions, results, achievements, skills, statistics, official statements, or personal experiences.',
-      'For acknowledgements, use only the acknowledgement text and factual details in the generation focus. Do not use other form fields to infer who is being thanked or what they contributed. Do not claim anyone gave guidance, mentoring, resources, expertise, or support unless that contribution is explicitly stated.',
-      'For vision, mission, objectives, and core values, do not create an official organizational statement. Use only a statement supplied in the report; if none is supplied, say that the report does not include enough information to draft it accurately.',
-      'For problems and actions, summarize only documented situations and responses. Do not propose a realistic example as if it actually happened.',
-      'Use relevant details from the whole report to avoid contradictions, but do not treat unrelated fields as evidence for this section.',
-      'Write concise, clear, formal academic prose suitable for direct insertion into a Word document.',
+      'Use only the current section text, the optional user focus, and source details supplied below as factual evidence. Other user-provided sections are context: use them only when directly relevant to align this section with the user’s actual tasks and experience.',
+      'The title and additional writing instructions describe the task; they are not evidence of facts.',
+      'Follow the user’s actual field and duties. Do not assume the placement is IT-related: never introduce IT, technology, healthcare, banking, business, education, or other industry-specific terms unless those details appear in the supplied factual evidence.',
+      'Do not infer or invent names, people thanked, roles, dates, duties, procedures, policies, problems, causes, actions, results, achievements, skills, statistics, official statements, or personal experiences.',
+      'For acknowledgements, use related task details to align the wording with the user’s actual experience. Never invent who is being thanked or claim anyone provided support unless the source explicitly names them and their contribution. If no recipient and contribution are supplied, do not express thanks or claim guidance, support, opportunity, growth, or learning; use neutral statements grounded only in supplied work facts, and include a sentence asking the user to add the names and contributions they want acknowledged. Do not treat a role, workplace, branch, or organization as an acknowledgement recipient unless explicitly identified as one.',
+      'For official vision, mission, objectives, and core-value statements, use only exact source details; if the source lacks them, briefly ask the user to provide the official wording.',
+      'For problems and actions, describe only situations and responses the user actually supplied. Never create a plausible example and present it as an event that happened.',
+      'Rewrite the supplied details clearly without changing their meaning or adding generic filler.',
       'Use first-person language when the section naturally describes the student experience. Otherwise use a formal academic or organizational voice.',
-      'Do not use markdown, bullet symbols, headings, labels, or brackets.',
-      'Separate paragraphs with one blank line.',
+      `Output exactly ${outputCount} ${outputUnit}. If sentences are requested, return exactly that many complete sentences in one paragraph. If paragraphs are requested, return exactly that many non-empty paragraphs separated by one blank line, with 1 to 3 concise sentences per paragraph.`,
+      'Do not use headings, labels, bullets, or numbered lists.',
+      'If the source does not contain enough information, use the requested output length to state what information the user needs to add. Do not guess.',
       instructions ? `Additional instructions: ${instructions}` : '',
+      focus ? `Optional user-provided focus and factual details: ${focus}` : '',
       currentText ? `Current text to improve: ${currentText}` : '',
-      `Report data: ${context}`,
+      sourceDetails ? `Source details for this section only: ${sourceDetails}` : '',
     ].filter(Boolean).join('\n\n');
 
     let text = '';

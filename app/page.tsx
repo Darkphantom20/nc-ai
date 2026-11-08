@@ -241,6 +241,7 @@ type NarrativeForm = Omit<typeof defaultForm, 'appendices'> & {
 };
 
 type AiNarrativeFieldKey = keyof typeof aiNarrativeFieldLabels;
+type AiGenerationFieldKey = AiNarrativeFieldKey | 'acknowledgement';
 type AiDraftField = {
   scope: 'report' | 'schoolPlacement';
   key: AiNarrativeFieldKey;
@@ -249,57 +250,60 @@ type AiDraftField = {
   selected: boolean;
 };
 
+type AIGenerationLength = {
+  unit: 'sentences' | 'paragraphs';
+  count: number;
+};
+
+type AIGenerationOptions = AIGenerationLength & {
+  focus: string;
+};
+
 function aiText(value: string, maxLength = 1000): string {
   return value.trim().slice(0, maxLength);
 }
 
-function buildAIReportContext(form: NarrativeForm): Record<string, unknown> {
-  const reportFields = Object.fromEntries(
-    (Object.keys(aiNarrativeFieldLabels) as AiNarrativeFieldKey[]).map((key) => [
-      key,
-      aiText(form[key]),
-    ]),
+function userProvidedText(value: string, example: string, maxLength = 1000): string {
+  const text = aiText(value, maxLength);
+  return text && text !== example.trim() ? text : '';
+}
+
+function buildAISectionContext(form: NarrativeForm, targetKey: AiGenerationFieldKey): Record<string, unknown> {
+  const relatedSections = Object.fromEntries(
+    (Object.keys(aiNarrativeFieldLabels) as (keyof typeof aiNarrativeFieldLabels)[])
+      .filter((key) => key !== targetKey)
+      .flatMap((key) => {
+        const text = userProvidedText(form[key], defaultForm[key]);
+        return text ? [[aiNarrativeFieldLabels[key], text]] : [];
+      }),
   );
-  const dailyJournal = form.appendices.dailyJournal.slice(0, 30).map((week) => ({
-    weekNumber: week.weekNumber,
-    totalHours: week.totalHours,
-    narrative: aiText(week.narrative, 500),
-    activities: week.activities
-      .filter((activity) => activity.accomplishment.trim())
-      .slice(0, 7)
-      .map((activity) => ({
+  const dailyJournal = form.appendices.dailyJournal.flatMap((week, weekIndex) => (
+    week.activities.flatMap((activity, activityIndex) => {
+      const example = defaultForm.appendices.dailyJournal[weekIndex]?.activities[activityIndex];
+      if (example && activity.day === example.day
+        && activity.date === example.date
+        && activity.accomplishment === example.accomplishment
+        && activity.hours === example.hours) return [];
+      const accomplishment = aiText(activity.accomplishment, 300);
+      if (!accomplishment) return [];
+      return [{
         day: aiText(activity.day, 40),
         date: aiText(activity.date, 40),
-        accomplishment: aiText(activity.accomplishment, 300),
+        accomplishment,
         hours: activity.hours,
-      })),
-  }));
-  const placement = form.schoolPlacement.enabled
-    ? {
-        enabled: true,
-        trainingOrganization: aiText(form.schoolPlacement.trainingOrganization, 200),
-        trainingLocation: aiText(form.schoolPlacement.trainingLocation, 200),
-        details: Object.fromEntries(
-          (Object.keys(aiNarrativeFieldLabels) as AiNarrativeFieldKey[]).map((key) => [
-            key,
-            aiText(form.schoolPlacement[key]),
-          ]),
-        ),
-      }
-    : { enabled: false };
+      }];
+    })
+  )).slice(0, 100);
+
+  const organization = userProvidedText(form.trainingOrganization, defaultForm.trainingOrganization, 200);
+  const location = userProvidedText(form.trainingLocation, defaultForm.trainingLocation, 200);
+  const degreeProgram = userProvidedText(form.degreeProgram, defaultForm.degreeProgram, 200);
 
   return {
-    trainingOrganization: aiText(form.trainingOrganization, 200),
-    trainingLocation: aiText(form.trainingLocation, 200),
-    collegeFaculty: aiText(form.collegeFaculty, 200),
-    degreeProgram: aiText(form.degreeProgram, 200),
-    studentName: aiText(form.studentName, 200),
-    submittedToName: aiText(form.submittedToName, 200),
-    submittedToTitle: aiText(form.submittedToTitle, 200),
-    trainingDuration: aiText(form.trainingDuration, 200),
-    studentYear: aiText(form.studentYear, 100),
-    ...reportFields,
-    schoolPlacement: placement,
+    ...(organization ? { trainingOrganization: organization } : {}),
+    ...(location ? { trainingLocation: location } : {}),
+    ...(degreeProgram ? { degreeProgram } : {}),
+    relatedSections,
     dailyJournal,
   };
 }
@@ -1711,11 +1715,11 @@ export default function Home() {
   };
 
   const generateFieldWithAI = async (
-    key: keyof typeof defaultForm,
+    key: AiGenerationFieldKey,
     title: string,
     currentText: string,
     instructions = '',
-    topic = '',
+    options: AIGenerationOptions,
   ): Promise<string | null> => {
     if (aiGenerating) return null;
     setAiGenerating(String(key));
@@ -1726,12 +1730,12 @@ export default function Home() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           title,
-          context: buildAIReportContext(form),
-          currentText: aiText(currentText, 12000),
-          instructions: [
-            instructions,
-            topic ? `User generation focus: ${aiText(topic, 2000)}. Make this focus central while preserving all compatible facts from the complete report data.` : '',
-          ].filter(Boolean).join('\n'),
+          sourceDetails: buildAISectionContext(form, key),
+          currentText: userProvidedText(currentText, defaultForm[key], 12000),
+          focus: aiText(options.focus, 2000),
+          instructions,
+          outputUnit: options.unit,
+          outputCount: options.count,
         }),
       });
       const result: unknown = await response.json().catch(() => null);
@@ -1757,7 +1761,7 @@ export default function Home() {
     }
   };
 
-  const generateWeeklyNarrative = async (weekIndex: number, topic = ''): Promise<string | null> => {
+  const generateWeeklyNarrative = async (weekIndex: number, options: AIGenerationOptions): Promise<string | null> => {
     const week = form.appendices.dailyJournal[weekIndex];
     if (!week || aiGenerating) return null;
     setAiGenerating(`weekly-${weekIndex}`);
@@ -1768,28 +1772,34 @@ export default function Home() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           title: `Week ${week.weekNumber} Daily Journal Narrative`,
-          context: {
-            report: buildAIReportContext(form),
-            week: {
-              weekNumber: week.weekNumber,
-              totalHours: week.totalHours,
-              narrative: aiText(week.narrative, 1000),
-              activities: week.activities
-                .filter((activity) => activity.accomplishment.trim())
-                .slice(0, 7)
-                .map((activity) => ({
+          sourceDetails: {
+            activities: week.activities
+              .flatMap((activity, activityIndex) => {
+                const example = defaultForm.appendices.dailyJournal[weekIndex]?.activities[activityIndex];
+                if (example && activity.day === example.day
+                  && activity.date === example.date
+                  && activity.accomplishment === example.accomplishment
+                  && activity.hours === example.hours) return [];
+                const accomplishment = aiText(activity.accomplishment, 500);
+                if (!accomplishment) return [];
+                return [{
                   day: aiText(activity.day, 40),
                   date: aiText(activity.date, 40),
-                  accomplishment: aiText(activity.accomplishment, 500),
+                  accomplishment,
                   hours: activity.hours,
-                })),
-            },
+                }];
+              })
+              .slice(0, 7),
           },
-          currentText: aiText(week.narrative, 12000),
-          instructions: [
-            'Summarize the listed daily activities and total hours into a coherent weekly OJT narrative. Do not invent activities, dates, hours, or skills.',
-            topic ? `User generation focus: ${aiText(topic, 2000)}. Make this focus central while keeping the narrative consistent with the complete report data.` : '',
-          ].filter(Boolean).join('\n'),
+          currentText: userProvidedText(
+            week.narrative,
+            defaultForm.appendices.dailyJournal[weekIndex]?.narrative || '',
+            12000,
+          ),
+          focus: aiText(options.focus, 2000),
+          instructions: 'Summarize only the selected week activities into a coherent weekly OJT narrative. Do not invent activities, dates, hours, or skills.',
+          outputUnit: options.unit,
+          outputCount: options.count,
         }),
       });
       const result: unknown = await response.json().catch(() => null);
@@ -3146,7 +3156,7 @@ export default function Home() {
                     value={form.acknowledgement}
                     onChange={(value) => updateField('acknowledgement', value)}
                     rows={4}
-                    onGenerate={(topic) => generateFieldWithAI('acknowledgement', 'Acknowledgement', form.acknowledgement, 'Rewrite the existing acknowledgement as concise, formal prose. Use only people and contributions named in that acknowledgement or in the optional focus; do not infer recipients or support from other form fields.', topic)}
+                    onGenerate={(topic) => generateFieldWithAI('acknowledgement', 'Acknowledgement', form.acknowledgement, 'Use related report details to align the acknowledgement with the student’s actual work. Do not invent recipients or claim gratitude, support, guidance, opportunity, growth, or learning unless the source explicitly says so. If no recipients are named, use neutral statements grounded only in supplied tasks and ask the user to add the names and contributions they want acknowledged.', topic)}
                     generating={aiGenerating === 'acknowledgement'}
                   />
                 </label>
@@ -3279,7 +3289,7 @@ export default function Home() {
                 </div>
                 <label className="block text-xs sm:text-sm font-medium text-slate-200">
                   <span className="text-blue-300/70 text-[10px] uppercase tracking-wider block mb-1">Recommendations</span>
-                  <ExpandableTextarea title="Recommendations" value={form.recommendations} onChange={(value) => updateField('recommendations', value)} rows={4} onGenerate={(topic) => generateFieldWithAI('recommendations', 'Recommendations for Improvement', form.recommendations, 'Write practical recommendations aligned with strengths, weaknesses, opportunities, and threats.', topic)} generating={aiGenerating === 'recommendations'} />
+                  <ExpandableTextarea title="Recommendations" value={form.recommendations} onChange={(value) => updateField('recommendations', value)} rows={4} onGenerate={(topic) => generateFieldWithAI('recommendations', 'Recommendations for Improvement', form.recommendations, 'Rewrite practical recommendations only from needs or facts explicitly present in this section or the user focus.', topic)} generating={aiGenerating === 'recommendations'} />
                 </label>
               </div>
             </SectionBlock>
@@ -3339,7 +3349,7 @@ export default function Home() {
                     value={form.relevancy}
                     onChange={(value) => updateField('relevancy', value)}
                     rows={4}
-                    onGenerate={(topic) => generateFieldWithAI('relevancy', 'Relevancy of the Organization', form.relevancy, 'Write a first-person paragraph explaining how the organization and OJT tasks relate to the degree program and career goals.', topic)}
+                    onGenerate={(topic) => generateFieldWithAI('relevancy', 'Relevancy of the Organization', form.relevancy, 'Rewrite the user-provided explanation of relevance. Do not infer the student’s career goals, degree relevance, or learning outcomes.', topic)}
                     generating={aiGenerating === 'relevancy'}
                   />
                 </label>
@@ -3974,12 +3984,14 @@ function ExpandableTextarea({
   rows?: number;
   placeholder?: string;
   className?: string;
-  onGenerate?: (topic?: string) => Promise<string | null> | void;
+  onGenerate?: (options: AIGenerationOptions) => Promise<string | null> | void;
   generating?: boolean;
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const [draft, setDraft] = useState(value);
   const [generationTopic, setGenerationTopic] = useState('');
+  const [generationUnit, setGenerationUnit] = useState<AIGenerationLength['unit']>('paragraphs');
+  const [generationCount, setGenerationCount] = useState(1);
   const [generationError, setGenerationError] = useState('');
 
   useEffect(() => {
@@ -3999,6 +4011,8 @@ function ExpandableTextarea({
   const openEditor = () => {
     setDraft(value);
     setGenerationTopic('');
+    setGenerationUnit('paragraphs');
+    setGenerationCount(1);
     setGenerationError('');
     setIsOpen(true);
   };
@@ -4046,7 +4060,7 @@ function ExpandableTextarea({
             />
             <footer className="space-y-3 border-t border-slate-800 bg-slate-950 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 sm:px-6 sm:pb-4">
               {onGenerate && (
-                <div>
+                <div className="space-y-3">
                   <label htmlFor={`generation-topic-${title}`} className="mb-1.5 block text-[10px] font-bold uppercase tracking-[0.16em] text-violet-300">
                     Optional generation focus or main points
                   </label>
@@ -4057,6 +4071,31 @@ function ExpandableTextarea({
                     placeholder="Add details to focus on (optional)"
                     className="w-full rounded-xl border border-violet-400/25 bg-violet-500/[0.06] px-3 py-2.5 text-sm text-slate-100 placeholder:text-slate-500 focus:border-violet-400 focus:outline-none"
                   />
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label className="block text-[10px] font-bold uppercase tracking-[0.16em] text-violet-300">
+                      Output type
+                      <select
+                        value={generationUnit}
+                        onChange={(event) => setGenerationUnit(event.target.value === 'sentences' ? 'sentences' : 'paragraphs')}
+                        className="mt-1.5 min-h-11 w-full rounded-xl border border-slate-700 bg-slate-900 px-3 text-sm font-medium normal-case tracking-normal text-slate-100 focus:border-violet-400 focus:outline-none"
+                      >
+                        <option value="paragraphs">Paragraphs</option>
+                        <option value="sentences">Sentences</option>
+                      </select>
+                    </label>
+                    <label className="block text-[10px] font-bold uppercase tracking-[0.16em] text-violet-300">
+                      Number of {generationUnit}
+                      <select
+                        value={generationCount}
+                        onChange={(event) => setGenerationCount(Number(event.target.value))}
+                        className="mt-1.5 min-h-11 w-full rounded-xl border border-slate-700 bg-slate-900 px-3 text-sm font-medium normal-case tracking-normal text-slate-100 focus:border-violet-400 focus:outline-none"
+                      >
+                        {Array.from({ length: 10 }, (_, index) => index + 1).map((count) => (
+                          <option key={count} value={count}>{count}</option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
                 </div>
               )}
               {generationError && (
@@ -4071,7 +4110,11 @@ function ExpandableTextarea({
                     onClick={async () => {
                       setGenerationError('');
                       try {
-                        const generatedText = await onGenerate(generationTopic);
+                        const generatedText = await onGenerate({
+                          focus: generationTopic,
+                          unit: generationUnit,
+                          count: generationCount,
+                        });
                         if (!generatedText?.trim()) {
                           throw new Error('The AI service returned no text. Please try again.');
                         }
