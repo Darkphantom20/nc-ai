@@ -274,6 +274,47 @@ type ImportedNarrativeDocument = {
   wordCount: number;
 };
 
+type ParsedNarrativeDocx = {
+  document: ImportedNarrativeDocument;
+  form: NarrativeForm;
+  mappedFields: string[];
+};
+
+type NarrativeImportTextField =
+  | 'acknowledgement'
+  | 'tableOfContents'
+  | 'background'
+  | 'vision'
+  | 'mission'
+  | 'objectives'
+  | 'coreValues'
+  | 'services'
+  | 'strengths'
+  | 'weaknesses'
+  | 'opportunities'
+  | 'threats'
+  | 'recommendations'
+  | 'tasks'
+  | 'procedures'
+  | 'issue1'
+  | 'issue1Action'
+  | 'issue2'
+  | 'issue2Action'
+  | 'lessons'
+  | 'selfEvaluation'
+  | 'relevancy';
+
+type NarrativeImportField = NarrativeImportTextField
+  | 'trainingOrganization'
+  | 'trainingLocation'
+  | 'collegeFaculty'
+  | 'degreeProgram'
+  | 'studentName'
+  | 'submittedToName'
+  | 'submittedToTitle'
+  | 'trainingDuration'
+  | 'studentYear';
+
 type StoredNarrativeDraft = {
   id: string;
   title: string;
@@ -606,7 +647,205 @@ async function parseDailyJournalDocx(file: File): Promise<ParsedJournalImport> {
   };
 }
 
-async function readNarrativeDocx(file: File): Promise<ImportedNarrativeDocument> {
+const narrativeImportFieldLabels: Record<string, keyof NarrativeForm> = {
+  'background of the organization': 'background',
+  'background of organization': 'background',
+  'vision': 'vision',
+  'mission': 'mission',
+  'objectives': 'objectives',
+  'core values': 'coreValues',
+  'products and services offered': 'services',
+  'products and services': 'services',
+  'strengths': 'strengths',
+  'weaknesses': 'weaknesses',
+  'opportunities': 'opportunities',
+  'threats': 'threats',
+  'recommendations for improvement': 'recommendations',
+  'recommendations for improvement of the organization': 'recommendations',
+  'assigned tasks and responsibilities': 'tasks',
+  'tasks and responsibilities assigned': 'tasks',
+  'tasks and responsibilities': 'tasks',
+  'duties and procedures conformed': 'procedures',
+  'duties and procedures followed': 'procedures',
+  'issue problem 1': 'issue1',
+  'description of issue problem 1': 'issue1',
+  'description of problem 1': 'issue1',
+  'description of issue 1': 'issue1',
+  'issue 1': 'issue1',
+  'problem 1': 'issue1',
+  'strategy action for problem 1': 'issue1Action',
+  'strategy action undertaken for problem 1': 'issue1Action',
+  'strategies or actions undertaken to solve problem 1': 'issue1Action',
+  'issue problem 2': 'issue2',
+  'description of issue problem 2': 'issue2',
+  'description of problem 2': 'issue2',
+  'description of issue 2': 'issue2',
+  'issue 2': 'issue2',
+  'problem 2': 'issue2',
+  'strategy action for problem 2': 'issue2Action',
+  'strategy action undertaken for problem 2': 'issue2Action',
+  'strategies or actions undertaken to solve problem 2': 'issue2Action',
+  'lessons learned from the situations': 'lessons',
+  'lessons learned from situations': 'lessons',
+  'lessons learned': 'lessons',
+  'self evaluation': 'selfEvaluation',
+  'relevancy of the organization': 'relevancy',
+  'relevancy of the organization with your programme of study and expected goals': 'relevancy',
+  'relevancy of the organization with your program of study and expected goals': 'relevancy'
+};
+
+const narrativeImportDisplayLabels: Record<NarrativeImportField, string> = {
+  acknowledgement: 'Acknowledgement',
+  tableOfContents: 'Table of Contents',
+  background: 'Organization Background',
+  vision: 'Vision',
+  mission: 'Mission',
+  objectives: 'Objectives',
+  coreValues: 'Core Values',
+  services: 'Products and Services',
+  strengths: 'Strengths',
+  weaknesses: 'Weaknesses',
+  opportunities: 'Opportunities',
+  threats: 'Threats',
+  recommendations: 'Recommendations',
+  tasks: 'Tasks and Responsibilities',
+  procedures: 'Duties and Procedures',
+  issue1: 'Issue / Problem 1',
+  issue1Action: 'Strategy / Action for Problem 1',
+  issue2: 'Issue / Problem 2',
+  issue2Action: 'Strategy / Action for Problem 2',
+  lessons: 'Lessons Learned',
+  selfEvaluation: 'Self-Evaluation',
+  relevancy: 'Relevancy of the Organization',
+  trainingOrganization: 'Organization',
+  trainingLocation: 'Location',
+  collegeFaculty: 'College / Faculty',
+  degreeProgram: 'Degree Program',
+  studentName: 'Student Name',
+  submittedToName: 'Adviser Name',
+  submittedToTitle: 'Adviser Title',
+  trainingDuration: 'Training Duration',
+  studentYear: 'Student Year Level'
+};
+
+function normalizeNarrativeImportLabel(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/^\s*(?:(?:chapter|section)\s+)?\d+(?:\.\d+)*[\s.)-]*/, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function createBlankNarrativeImportForm(): NarrativeForm {
+  const form = createDefaultNarrativeForm();
+  const narrativeFields: NarrativeImportField[] = [
+    'trainingOrganization', 'trainingLocation', 'collegeFaculty', 'degreeProgram',
+    'studentName', 'submittedToName', 'submittedToTitle', 'trainingDuration',
+    'studentYear', 'acknowledgement', 'tableOfContents', 'background', 'vision',
+    'mission', 'objectives', 'coreValues', 'services', 'strengths', 'weaknesses',
+    'opportunities', 'threats', 'recommendations', 'tasks', 'procedures', 'issue1',
+    'issue1Action', 'issue2', 'issue2Action', 'lessons', 'selfEvaluation', 'relevancy'
+  ];
+  Object.assign(form, Object.fromEntries(narrativeFields.map((field) => [field, ''])));
+  form.schoolPlacement = { ...form.schoolPlacement, enabled: false };
+  for (const field of [
+    'trainingOrganization', 'trainingLocation', 'background', 'vision', 'mission',
+    'objectives', 'coreValues', 'services', 'strengths', 'weaknesses', 'opportunities',
+    'threats', 'recommendations', 'tasks', 'procedures', 'issue1', 'issue1Action',
+    'issue2', 'issue2Action', 'lessons', 'selfEvaluation', 'relevancy'
+  ] as const) {
+    form.schoolPlacement[field] = '';
+  }
+  form.appendices = {
+    ...form.appendices,
+    dailyJournal: [],
+    primeNarrative: '',
+    reportFooter: {
+      preparedByLabel: 'Prepared By:',
+      preparedByName: '',
+      checkedByLabel: 'Checked By:',
+      checkedByName: '',
+      checkedByRole: '',
+      officeInCharge: '',
+      dateLabel: 'Date:',
+      dateValue: ''
+    }
+  };
+  return form;
+}
+
+function findNarrativeImportField(label: string): NarrativeImportTextField | null {
+  const normalized = normalizeNarrativeImportLabel(label);
+  if (/^acknowledg(?:e)?ments?$/.test(normalized)) return 'acknowledgement';
+  if (narrativeImportFieldLabels[normalized]) return narrativeImportFieldLabels[normalized] as NarrativeImportTextField;
+  const match = Object.entries(narrativeImportFieldLabels)
+    .find(([alias]) => normalized.startsWith(`${alias} `));
+  return (match?.[1] as NarrativeImportTextField | undefined) || null;
+}
+
+function getNarrativeParagraphText(paragraph: Element): string {
+  const collectText = (node: Node): string => {
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      const element = node as Element;
+      if (element.namespaceURI === wordProcessingNamespace) {
+        if (element.localName === 't') return element.textContent || '';
+        if (element.localName === 'br' || element.localName === 'cr') return '\n';
+        if (element.localName === 'tab') return ' ';
+      }
+    }
+    return Array.from(node.childNodes).map(collectText).join('');
+  };
+  return collectText(paragraph);
+}
+
+function applyNarrativeImportLabel(form: NarrativeForm, label: string, value: string): NarrativeImportField | null {
+  const normalized = normalizeNarrativeImportLabel(label);
+  const scalarLabels: Record<string, NarrativeImportField> = {
+    'student name': 'studentName',
+    'name of student': 'studentName',
+    'ojt student name': 'studentName',
+    'trainee name': 'studentName',
+    'organization': 'trainingOrganization',
+    'organization name': 'trainingOrganization',
+    'training organization': 'trainingOrganization',
+    'name of organization': 'trainingOrganization',
+    'name of company': 'trainingOrganization',
+    'host organization': 'trainingOrganization',
+    'company': 'trainingOrganization',
+    'office': 'trainingOrganization',
+    'location': 'trainingLocation',
+    'training location': 'trainingLocation',
+    'college faculty': 'collegeFaculty',
+    'college faculty department': 'collegeFaculty',
+    'college': 'collegeFaculty',
+    'faculty': 'collegeFaculty',
+    'degree program': 'degreeProgram',
+    'program': 'degreeProgram',
+    'course': 'degreeProgram',
+    'submitted to': 'submittedToName',
+    'adviser': 'submittedToName',
+    'advisor': 'submittedToName',
+    'name of adviser': 'submittedToName',
+    'name of advisor': 'submittedToName',
+    'ojt adviser': 'submittedToName',
+    'submitted to title': 'submittedToTitle',
+    'adviser title': 'submittedToTitle',
+    'advisor title': 'submittedToTitle',
+    'title position': 'submittedToTitle',
+    'training duration': 'trainingDuration',
+    'duration': 'trainingDuration',
+    'year level': 'studentYear',
+    'student year level': 'studentYear'
+  };
+  const key = scalarLabels[normalized] || findNarrativeImportField(label);
+  if (!key || !value.trim()) return null;
+  Object.assign(form, { [key]: value.trim() });
+  return key;
+}
+
+async function readNarrativeDocx(file: File): Promise<ParsedNarrativeDocx> {
   if (!file.name.toLowerCase().endsWith('.docx')) {
     throw new Error('Choose a Word .docx file.');
   }
@@ -626,6 +865,8 @@ async function readNarrativeDocx(file: File): Promise<ImportedNarrativeDocument>
   const documentParts = Object.keys(archive.files).filter((path) => (
     /^word\/(?:document|header\d*|footer\d*|footnotes|endnotes)\.xml$/.test(path)
   ));
+  const narrativeForm = createBlankNarrativeImportForm();
+  const mappedFields = new Set<string>();
   const extractedParts = await Promise.all(documentParts.map(async (path) => {
     const entry = archive.file(path);
     if (!entry) return '';
@@ -634,25 +875,106 @@ async function readNarrativeDocx(file: File): Promise<ImportedNarrativeDocument>
       throw new Error('The DOCX contains invalid document data.');
     }
 
-    return Array.from(xml.getElementsByTagNameNS(wordProcessingNamespace, 'p'))
-      .map((paragraph) => Array.from(paragraph.getElementsByTagNameNS(wordProcessingNamespace, 't'))
-        .map((textNode) => textNode.textContent || '')
-        .join(''))
-      .filter(Boolean)
-      .join('\n');
+    const paragraphs = Array.from(xml.getElementsByTagNameNS(wordProcessingNamespace, 'p'))
+      .map((paragraph) => getNarrativeParagraphText(paragraph).trim())
+      .filter(Boolean);
+
+    let activeField: NarrativeImportTextField | null = null;
+    for (const paragraph of paragraphs) {
+      for (const paragraphLine of paragraph.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)) {
+      const paragraph = paragraphLine;
+      const field = findNarrativeImportField(paragraph);
+      if (field) {
+        activeField = field;
+        continue;
+      }
+
+      const labeledValue = paragraph.match(/^([^:：]{2,100})\s*[:：]\s*(.+)$/);
+      const labeledField = labeledValue
+        ? applyNarrativeImportLabel(narrativeForm, labeledValue[1], labeledValue[2])
+        : null;
+      if (labeledValue && labeledField) {
+        mappedFields.add(narrativeImportDisplayLabels[labeledField]);
+        activeField = null;
+        continue;
+      }
+
+      const tocHeading = /^(?:table of contents|contents)$/i.test(normalizeNarrativeImportLabel(paragraph));
+      if (tocHeading) {
+        activeField = 'tableOfContents';
+        continue;
+      }
+
+      const normalizedParagraph = normalizeNarrativeImportLabel(paragraph);
+      if (/^(?:acknowledg(?:e)?ments?|introduction|organization company analysis|tasks and duties|case analysis|reflections|appendices|appendix|list of (?:tables|figures|illustrations))$/.test(normalizedParagraph)) {
+        activeField = null;
+        continue;
+      }
+
+      if (activeField === 'acknowledgement' && /^[A-Z][A-Z .,'’-]{2,}$/.test(paragraph)) {
+        Object.assign(narrativeForm, { studentName: paragraph });
+        mappedFields.add(narrativeImportDisplayLabels.studentName);
+        activeField = null;
+        continue;
+      }
+      if (/^(?:bachelor|associate|master|doctor)\b/i.test(paragraph)) {
+        Object.assign(narrativeForm, { degreeProgram: paragraph });
+        mappedFields.add(narrativeImportDisplayLabels.degreeProgram);
+        activeField = null;
+        continue;
+      }
+
+      if (activeField) {
+        const existing = narrativeForm[activeField];
+        Object.assign(narrativeForm, {
+          [activeField]: `${typeof existing === 'string' ? existing : ''}${existing ? '\n' : ''}${paragraph}`
+        });
+        mappedFields.add(narrativeImportDisplayLabels[activeField]);
+      }
+      }
+    }
+
+    if (path === 'word/document.xml') {
+      for (const row of Array.from(xml.getElementsByTagNameNS(wordProcessingNamespace, 'tr'))) {
+        const cells = Array.from(row.getElementsByTagNameNS(wordProcessingNamespace, 'tc'))
+          .map((cell) => Array.from(cell.getElementsByTagNameNS(wordProcessingNamespace, 't'))
+            .map((textNode) => textNode.textContent || '')
+            .join(' ')
+            .trim());
+        for (let index = 0; index < cells.length - 1; index += 1) {
+          const mappedField = applyNarrativeImportLabel(narrativeForm, cells[index], cells[index + 1]);
+          if (mappedField) mappedFields.add(narrativeImportDisplayLabels[mappedField]);
+        }
+      }
+    }
+
+    return paragraphs.join('\n');
   }));
+  try {
+    const journalImport = await parseDailyJournalDocx(file);
+    narrativeForm.appendices.dailyJournal = normalizeDailyJournalDays(journalImport.weeks);
+    mappedFields.add('Daily Journal');
+  } catch (error) {
+    if (!(error instanceof Error) || !error.message.startsWith('No Daily Journal tables found.')) {
+      throw error;
+    }
+  }
   const extractedText = extractedParts.filter(Boolean).join('\n\n').trim();
   if (!extractedText) {
     throw new Error('No readable text was found in this DOCX.');
   }
 
   return {
-    fileName: file.name,
-    blob: new Blob([fileData], {
-      type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-    }),
-    extractedText,
-    wordCount: extractedText.match(/\S+/g)?.length || 0
+    document: {
+      fileName: file.name,
+      blob: new Blob([fileData], {
+        type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+      }),
+      extractedText,
+      wordCount: extractedText.match(/\S+/g)?.length || 0
+    },
+    form: mergeNarrativeForm(narrativeForm),
+    mappedFields: Array.from(mappedFields)
   };
 }
 
@@ -840,7 +1162,7 @@ export default function Home() {
   const [activeDraftId, setActiveDraftId] = useState('');
   const [showNewDraftDialog, setShowNewDraftDialog] = useState(false);
   const [newDraftTitle, setNewDraftTitle] = useState('');
-  const [pendingNarrativeImport, setPendingNarrativeImport] = useState<ImportedNarrativeDocument | null>(null);
+  const [pendingNarrativeImport, setPendingNarrativeImport] = useState<ParsedNarrativeDocx | null>(null);
   const [previewingImportedDocument, setPreviewingImportedDocument] = useState<ImportedNarrativeDocument | null>(null);
   const [importedDocumentRendering, setImportedDocumentRendering] = useState(false);
   const [importedDocumentPreviewError, setImportedDocumentPreviewError] = useState('');
@@ -1049,7 +1371,7 @@ export default function Home() {
   }, [drafts, activeDraftId, isMounted]);
 
   const activeDraft = drafts.find((draft) => draft.id === activeDraftId);
-  const importedDocumentToPreview = pendingNarrativeImport || previewingImportedDocument;
+  const importedDocumentToPreview = pendingNarrativeImport?.document || previewingImportedDocument;
 
   const openNewDraftDialog = () => {
     setNewDraftTitle(`Narrative ${drafts.length + 1}`);
@@ -1067,11 +1389,11 @@ export default function Home() {
     setStatus('Reading complete narrative DOCX...');
     try {
       const importedDocument = await readNarrativeDocx(file);
-      setNewDraftTitle(file.name.replace(/\.docx$/i, '') || `Narrative ${drafts.length + 1}`);
+      setNewDraftTitle(importedDocument.document.fileName.replace(/\.docx$/i, '') || `Narrative ${drafts.length + 1}`);
       setPendingNarrativeImport(importedDocument);
       setPreviewingImportedDocument(null);
       setImportedDocumentPreviewError('');
-      setStatus(`Read ${importedDocument.wordCount.toLocaleString()} words from DOCX`);
+      setStatus(`Mapped ${importedDocument.mappedFields.length} fields from DOCX`);
     } catch (error) {
       console.error('Error importing narrative DOCX:', error);
       const message = error instanceof Error ? error.message : 'Could not read the DOCX file.';
@@ -1084,12 +1406,12 @@ export default function Home() {
 
   const createNarrativeFromDocx = () => {
     if (!pendingNarrativeImport) return;
-    const importedDocument = pendingNarrativeImport;
+    const importedDocument = pendingNarrativeImport.document;
     const newDraft: NarrativeDraft = {
       id: createNarrativeId(),
       title: newDraftTitle.trim() || importedDocument.fileName.replace(/\.docx$/i, ''),
       updatedAt: new Date().toISOString(),
-      form: createDefaultNarrativeForm(),
+      form: pendingNarrativeImport.form,
       importedDocument
     };
     setDrafts((currentDrafts) => [
@@ -1103,7 +1425,7 @@ export default function Home() {
     setShowNewDraftDialog(false);
     setPendingNarrativeImport(null);
     setPreviewingImportedDocument(importedDocument);
-    setStatus('Narrative created from imported DOCX');
+    setStatus(`Imported ${pendingNarrativeImport.mappedFields.length} fields into the editor`);
   };
 
   const createNarrative = () => {
@@ -2039,7 +2361,7 @@ export default function Home() {
               {isImportingNarrative ? 'Reading DOCX...' : 'Import complete narrative DOCX'}
             </button>
             <p className="mt-2 text-xs leading-5 text-slate-400">
-              Import the full report, including its cover, acknowledgement, contents, appendices, images, and page layout. You can review every page before creating the narrative.
+              Import the full report and review its pages. Recognized content will be placed into matching editable form fields.
             </p>
             <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
               <button
@@ -2085,8 +2407,27 @@ export default function Home() {
                 Read {importedDocumentToPreview.wordCount.toLocaleString()} words. Scroll through the rendered document to review the cover page, acknowledgement, contents, report sections, images, and appendices.
               </p>
               <p className="mt-2 text-xs leading-5 text-slate-400">
-                The original DOCX is preserved with this narrative for preview. Its contents are not automatically mapped into the editable report fields.
+                Recognized headings and labeled details are mapped into their matching editor fields. Text that does not match a known field is preserved in the original DOCX preview.
               </p>
+              {pendingNarrativeImport && (
+                <div className="mt-3 rounded-lg border border-cyan-500/20 bg-cyan-500/[0.06] p-3 text-xs text-cyan-100">
+                  <p className="font-semibold">
+                    {pendingNarrativeImport.mappedFields.length
+                      ? `Ready to fill ${pendingNarrativeImport.mappedFields.length} editor fields`
+                      : 'No matching editor headings found'}
+                  </p>
+                  {pendingNarrativeImport.mappedFields.length > 0 && (
+                    <p className="mt-1 leading-5 text-cyan-100/80">
+                      {pendingNarrativeImport.mappedFields.join(' · ')}
+                    </p>
+                  )}
+                  {pendingNarrativeImport.mappedFields.length === 0 && (
+                    <p className="mt-1 leading-5 text-cyan-100/80">
+                      The new narrative will start with blank fields. Review the document text and update its headings or enter the fields manually.
+                    </p>
+                  )}
+                </div>
+              )}
               {pendingNarrativeImport && (
                 <label className="mt-3 block text-xs text-slate-300">
                   Narrative name
@@ -2139,7 +2480,7 @@ export default function Home() {
                   onClick={createNarrativeFromDocx}
                   className="min-h-11 rounded-xl bg-cyan-500 px-4 text-sm font-bold text-slate-950"
                 >
-                  Create narrative from DOCX
+                  Import into editor
                 </button>
               )}
             </footer>
