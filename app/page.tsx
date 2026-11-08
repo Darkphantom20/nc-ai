@@ -302,7 +302,8 @@ type NarrativeImportTextField =
   | 'issue2Action'
   | 'lessons'
   | 'selfEvaluation'
-  | 'relevancy';
+  | 'relevancy'
+  | 'primeNarrative';
 
 type NarrativeImportField = NarrativeImportTextField
   | 'trainingOrganization'
@@ -647,7 +648,7 @@ async function parseDailyJournalDocx(file: File): Promise<ParsedJournalImport> {
   };
 }
 
-const narrativeImportFieldLabels: Record<string, keyof NarrativeForm> = {
+const narrativeImportFieldLabels: Record<string, NarrativeImportField> = {
   'background of the organization': 'background',
   'background of organization': 'background',
   'vision': 'vision',
@@ -663,10 +664,18 @@ const narrativeImportFieldLabels: Record<string, keyof NarrativeForm> = {
   'recommendations for improvement': 'recommendations',
   'recommendations for improvement of the organization': 'recommendations',
   'assigned tasks and responsibilities': 'tasks',
+  'describe the tasks and responsibilities assigned': 'tasks',
+  'describe tasks and responsibilities assigned': 'tasks',
+  'tasks assigned': 'tasks',
   'tasks and responsibilities assigned': 'tasks',
   'tasks and responsibilities': 'tasks',
   'duties and procedures conformed': 'procedures',
   'duties and procedures followed': 'procedures',
+  'procedures conformed': 'procedures',
+  'one page narrative report of prime': 'primeNarrative',
+  'prime report narrative': 'primeNarrative',
+  'prime narrative report': 'primeNarrative',
+  'prime narrative': 'primeNarrative',
   'issue problem 1': 'issue1',
   'description of issue problem 1': 'issue1',
   'description of problem 1': 'issue1',
@@ -687,8 +696,10 @@ const narrativeImportFieldLabels: Record<string, keyof NarrativeForm> = {
   'strategies or actions undertaken to solve problem 2': 'issue2Action',
   'lessons learned from the situations': 'lessons',
   'lessons learned from situations': 'lessons',
+  'lessons learned from the situation': 'lessons',
   'lessons learned': 'lessons',
   'self evaluation': 'selfEvaluation',
+  'self evaluation from the learning process experienced': 'selfEvaluation',
   'relevancy of the organization': 'relevancy',
   'relevancy of the organization with your programme of study and expected goals': 'relevancy',
   'relevancy of the organization with your program of study and expected goals': 'relevancy'
@@ -717,6 +728,7 @@ const narrativeImportDisplayLabels: Record<NarrativeImportField, string> = {
   lessons: 'Lessons Learned',
   selfEvaluation: 'Self-Evaluation',
   relevancy: 'Relevancy of the Organization',
+  primeNarrative: 'PRIME Report Narrative',
   trainingOrganization: 'Organization',
   trainingLocation: 'Location',
   collegeFaculty: 'College / Faculty',
@@ -776,13 +788,56 @@ function createBlankNarrativeImportForm(): NarrativeForm {
   return form;
 }
 
+function getNarrativeImportFieldValue(form: NarrativeForm, field: NarrativeImportTextField): string {
+  return field === 'primeNarrative' ? form.appendices.primeNarrative : form[field];
+}
+
+function appendNarrativeImportFieldValue(
+  form: NarrativeForm,
+  field: NarrativeImportTextField,
+  paragraph: string
+): void {
+  if (field === 'primeNarrative') {
+    form.appendices.primeNarrative = `${form.appendices.primeNarrative}${form.appendices.primeNarrative ? '\n' : ''}${paragraph}`;
+    return;
+  }
+  const existing = form[field];
+  Object.assign(form, { [field]: `${existing}${existing ? '\n' : ''}${paragraph}` });
+}
+
 function findNarrativeImportField(label: string): NarrativeImportTextField | null {
   const normalized = normalizeNarrativeImportLabel(label);
   if (/^acknowledg(?:e)?ments?$/.test(normalized)) return 'acknowledgement';
-  if (narrativeImportFieldLabels[normalized]) return narrativeImportFieldLabels[normalized] as NarrativeImportTextField;
+  const exactField = narrativeImportFieldLabels[normalized];
+  if (exactField) return exactField as NarrativeImportTextField;
   const match = Object.entries(narrativeImportFieldLabels)
+    .sort(([left], [right]) => right.length - left.length)
     .find(([alias]) => normalized.startsWith(`${alias} `));
   return (match?.[1] as NarrativeImportTextField | undefined) || null;
+}
+
+function findNarrativeImportHeading(
+  value: string
+): { field: NarrativeImportTextField; remainder: string } | null {
+  const field = findNarrativeImportField(value);
+  if (!field) return null;
+
+  const normalized = normalizeNarrativeImportLabel(value);
+  const alias = Object.keys(narrativeImportFieldLabels)
+    .filter((candidate) => normalized === candidate || normalized.startsWith(`${candidate} `))
+    .sort((left, right) => right.length - left.length)[0]
+    || (/^acknowledg(?:e)?ments?\b/.test(normalized) ? 'acknowledgement' : '');
+  if (!alias) return { field, remainder: '' };
+
+  const words = value.trim().split(/\s+/);
+  for (let wordCount = 1; wordCount <= words.length; wordCount += 1) {
+    if (normalizeNarrativeImportLabel(words.slice(0, wordCount).join(' ')) !== alias) continue;
+    return {
+      field,
+      remainder: words.slice(wordCount).join(' ').replace(/^[:：–—-]\s*/, '').trim()
+    };
+  }
+  return { field, remainder: '' };
 }
 
 function getNarrativeParagraphText(paragraph: Element): string {
@@ -795,7 +850,27 @@ function getNarrativeParagraphText(paragraph: Element): string {
         if (element.localName === 'tab') return ' ';
       }
     }
-    return Array.from(node.childNodes).map(collectText).join('');
+    let result = '';
+    let previousWasRun = false;
+    for (const child of Array.from(node.childNodes)) {
+      const childText = collectText(child);
+      const childIsRun = child.nodeType === Node.ELEMENT_NODE
+        && (child as Element).namespaceURI === wordProcessingNamespace
+        && (child as Element).localName === 'r';
+      if (
+        previousWasRun
+        && childIsRun
+        && result
+        && childText
+        && /[A-Za-z0-9]$/.test(result)
+        && /^[A-Za-z0-9]/.test(childText)
+      ) {
+        result += ' ';
+      }
+      result += childText;
+      previousWasRun = childIsRun;
+    }
+    return result;
   };
   return collectText(paragraph);
 }
@@ -841,7 +916,11 @@ function applyNarrativeImportLabel(form: NarrativeForm, label: string, value: st
   };
   const key = scalarLabels[normalized] || findNarrativeImportField(label);
   if (!key || !value.trim()) return null;
-  Object.assign(form, { [key]: value.trim() });
+  if (key === 'primeNarrative') {
+    form.appendices.primeNarrative = value.trim();
+  } else {
+    Object.assign(form, { [key]: value.trim() });
+  }
   return key;
 }
 
@@ -876,61 +955,92 @@ async function readNarrativeDocx(file: File): Promise<ParsedNarrativeDocx> {
     }
 
     const paragraphs = Array.from(xml.getElementsByTagNameNS(wordProcessingNamespace, 'p'))
-      .map((paragraph) => getNarrativeParagraphText(paragraph).trim())
+      .map((paragraph) => ({
+        text: getNarrativeParagraphText(paragraph).trim(),
+        style: getWordChildren(paragraph, 'pPr')
+          .flatMap((properties) => getWordChildren(properties, 'pStyle'))
+          .map((style) => style.getAttributeNS(wordProcessingNamespace, 'val') || '')
+          .join(' ')
+      }))
       .filter(Boolean);
 
     let activeField: NarrativeImportTextField | null = null;
     for (const paragraph of paragraphs) {
-      for (const paragraphLine of paragraph.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)) {
-      const paragraph = paragraphLine;
-      const field = findNarrativeImportField(paragraph);
-      if (field) {
-        activeField = field;
-        continue;
-      }
+      for (const line of paragraph.text.split(/\r?\n/).map((item) => item.trim()).filter(Boolean)) {
+        const normalizedLine = normalizeNarrativeImportLabel(line);
+        if (/^(?:table of contents|contents)$/.test(normalizedLine)) {
+          activeField = 'tableOfContents';
+          continue;
+        }
 
-      const labeledValue = paragraph.match(/^([^:：]{2,100})\s*[:：]\s*(.+)$/);
-      const labeledField = labeledValue
-        ? applyNarrativeImportLabel(narrativeForm, labeledValue[1], labeledValue[2])
-        : null;
-      if (labeledValue && labeledField) {
-        mappedFields.add(narrativeImportDisplayLabels[labeledField]);
-        activeField = null;
-        continue;
-      }
+        if (activeField === 'tableOfContents' && /^\d+(?:\.\d+)*\s/.test(line)) {
+          appendNarrativeImportFieldValue(narrativeForm, activeField, line);
+          mappedFields.add(narrativeImportDisplayLabels[activeField]);
+          continue;
+        }
 
-      const tocHeading = /^(?:table of contents|contents)$/i.test(normalizeNarrativeImportLabel(paragraph));
-      if (tocHeading) {
-        activeField = 'tableOfContents';
-        continue;
-      }
+        if (/^(?:vision mission(?: and)? objectives|strengths and weaknesses(?: of the organization)?(?: internal factors)?|opportunities and threats(?: of the organization)?(?: external factors)?|description of (?:two )?(?:issues?|problems?) encountered|strategies or actions undertaken to solve (?:the )?(?:issues?|problems?))\b/.test(normalizedLine)) {
+          activeField = null;
+          continue;
+        }
 
-      const normalizedParagraph = normalizeNarrativeImportLabel(paragraph);
-      if (/^(?:acknowledg(?:e)?ments?|introduction|organization company analysis|tasks and duties|case analysis|reflections|appendices|appendix|list of (?:tables|figures|illustrations))$/.test(normalizedParagraph)) {
-        activeField = null;
-        continue;
-      }
+        const heading = findNarrativeImportHeading(line);
+        if (heading) {
+          activeField = heading.field;
+          if (heading.remainder) {
+            appendNarrativeImportFieldValue(narrativeForm, heading.field, heading.remainder);
+            mappedFields.add(narrativeImportDisplayLabels[heading.field]);
+          }
+          continue;
+        }
 
-      if (activeField === 'acknowledgement' && /^[A-Z][A-Z .,'’-]{2,}$/.test(paragraph)) {
-        Object.assign(narrativeForm, { studentName: paragraph });
-        mappedFields.add(narrativeImportDisplayLabels.studentName);
-        activeField = null;
-        continue;
-      }
-      if (/^(?:bachelor|associate|master|doctor)\b/i.test(paragraph)) {
-        Object.assign(narrativeForm, { degreeProgram: paragraph });
-        mappedFields.add(narrativeImportDisplayLabels.degreeProgram);
-        activeField = null;
-        continue;
-      }
+        const labeledValue = line.match(/^([^:：]{2,100})\s*[:：]\s*(.+)$/);
+        const labeledField = labeledValue
+          ? applyNarrativeImportLabel(narrativeForm, labeledValue[1], labeledValue[2])
+          : null;
+        if (labeledValue && labeledField) {
+          mappedFields.add(narrativeImportDisplayLabels[labeledField]);
+          activeField = null;
+          continue;
+        }
 
-      if (activeField) {
-        const existing = narrativeForm[activeField];
-        Object.assign(narrativeForm, {
-          [activeField]: `${typeof existing === 'string' ? existing : ''}${existing ? '\n' : ''}${paragraph}`
-        });
-        mappedFields.add(narrativeImportDisplayLabels[activeField]);
-      }
+        if (/^(?:acknowledg(?:e)?ments?(?: table of contents.*)?|introduction|organization company analysis|organization analysis|tasks and duties|case analysis|reflections|appendices|appendix|list of (?:tables|figures|illustrations))\b/.test(normalizedLine)) {
+          activeField = null;
+          continue;
+        }
+
+        if (activeField === 'acknowledgement' && /^[A-Z][A-Z .,'’-]{2,}$/.test(line)) {
+          Object.assign(narrativeForm, { studentName: line });
+          mappedFields.add(narrativeImportDisplayLabels.studentName);
+          activeField = null;
+          continue;
+        }
+        if (/^(?:bachelor|associate|master|doctor)\b/i.test(line)) {
+          Object.assign(narrativeForm, { degreeProgram: line });
+          mappedFields.add(narrativeImportDisplayLabels.degreeProgram);
+          activeField = null;
+          continue;
+        }
+        const combinedSignature = line.match(/^([A-Z][A-Z .,'’-]{2,})\s+((?:bachelor|associate|master|doctor)\b.*)$/i);
+        if (combinedSignature) {
+          Object.assign(narrativeForm, {
+            studentName: combinedSignature[1].trim(),
+            degreeProgram: combinedSignature[2].split(/\s+(?:jose rizal|university of)\b/i)[0].trim()
+          });
+          mappedFields.add(narrativeImportDisplayLabels.studentName);
+          mappedFields.add(narrativeImportDisplayLabels.degreeProgram);
+          activeField = null;
+          continue;
+        }
+
+        if (/heading[1-6]/i.test(paragraph.style)) {
+          activeField = null;
+          continue;
+        }
+        if (activeField) {
+          appendNarrativeImportFieldValue(narrativeForm, activeField, line);
+          mappedFields.add(narrativeImportDisplayLabels[activeField]);
+        }
       }
     }
 
@@ -948,7 +1058,7 @@ async function readNarrativeDocx(file: File): Promise<ParsedNarrativeDocx> {
       }
     }
 
-    return paragraphs.join('\n');
+    return paragraphs.map((paragraph) => paragraph.text).join('\n');
   }));
   try {
     const journalImport = await parseDailyJournalDocx(file);
