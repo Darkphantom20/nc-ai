@@ -1679,13 +1679,22 @@ export default function Home() {
           ].filter(Boolean).join('\n'),
         }),
       });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || 'Could not generate text.');
+      const result: unknown = await response.json().catch(() => null);
+      if (!response.ok) {
+        const message = isRecord(result) && typeof result.error === 'string'
+          ? result.error
+          : 'Could not generate text. Please try again.';
+        throw new Error(message);
+      }
+      if (!isRecord(result) || typeof result.text !== 'string' || !result.text.trim()) {
+        throw new Error('The AI service returned no text. Please try again.');
+      }
       setStatus(`${title} generated and aligned`);
-      return String(result.text || '').trim() || null;
+      return result.text.trim();
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : 'Could not generate text.');
-      return null;
+      const message = error instanceof Error ? error.message : 'Could not generate text.';
+      setStatus(message);
+      throw new Error(message);
     } finally {
       setAiGenerating('');
     }
@@ -1710,13 +1719,22 @@ export default function Home() {
           ].filter(Boolean).join('\n'),
         }),
       });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || 'Could not generate the weekly narrative.');
+      const result: unknown = await response.json().catch(() => null);
+      if (!response.ok) {
+        const message = isRecord(result) && typeof result.error === 'string'
+          ? result.error
+          : 'Could not generate the weekly narrative. Please try again.';
+        throw new Error(message);
+      }
+      if (!isRecord(result) || typeof result.text !== 'string' || !result.text.trim()) {
+        throw new Error('The AI service returned no text. Please try again.');
+      }
       setStatus(`Week ${week.weekNumber} narrative generated and aligned`);
-      return String(result.text || '').trim() || null;
+      return result.text.trim();
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : 'Could not generate the weekly narrative.');
-      return null;
+      const message = error instanceof Error ? error.message : 'Could not generate the weekly narrative.';
+      setStatus(message);
+      throw new Error(message);
     } finally {
       setAiGenerating('');
     }
@@ -3053,7 +3071,7 @@ export default function Home() {
                     value={form.acknowledgement}
                     onChange={(value) => updateField('acknowledgement', value)}
                     rows={4}
-                    onGenerate={(topic) => generateFieldWithAI('acknowledgement', 'Acknowledgement', form.acknowledgement, 'Write a sincere formal acknowledgement paragraph. Name the exact OJT organization, office or department, placement location, adviser, faculty, university, and internship benefits only when they appear in the complete report data.', topic)}
+                    onGenerate={(topic) => generateFieldWithAI('acknowledgement', 'Acknowledgement', form.acknowledgement, 'Rewrite the existing acknowledgement as concise, formal prose. Use only people and contributions named in that acknowledgement or in the optional focus; do not infer recipients or support from other form fields.', topic)}
                     generating={aiGenerating === 'acknowledgement'}
                   />
                 </label>
@@ -3094,11 +3112,11 @@ export default function Home() {
                 <div className="grid gap-3 sm:gap-5 md:grid-cols-2">
                   <label className="block text-xs sm:text-sm font-medium text-slate-200">
                     <span className="text-cyan-300/70 text-[10px] uppercase tracking-wider block mb-1">Vision</span>
-                    <ExpandableTextarea title="Vision" value={form.vision} onChange={(value) => updateField('vision', value)} rows={3} onGenerate={(topic) => generateFieldWithAI('vision', 'Vision', form.vision, 'Write a concise official-style vision statement based on the organization data.', topic)} generating={aiGenerating === 'vision'} />
+                    <ExpandableTextarea title="Vision" value={form.vision} onChange={(value) => updateField('vision', value)} rows={3} onGenerate={(topic) => generateFieldWithAI('vision', 'Vision', form.vision, 'Use only an official vision statement explicitly included in the report. If none is provided, state that more information is needed; do not create one.', topic)} generating={aiGenerating === 'vision'} />
                   </label>
                   <label className="block text-xs sm:text-sm font-medium text-slate-200">
                     <span className="text-cyan-300/70 text-[10px] uppercase tracking-wider block mb-1">Mission</span>
-                    <ExpandableTextarea title="Mission" value={form.mission} onChange={(value) => updateField('mission', value)} rows={3} onGenerate={(topic) => generateFieldWithAI('mission', 'Mission', form.mission, 'Write a concise official-style mission statement based on the organization data.', topic)} generating={aiGenerating === 'mission'} />
+                    <ExpandableTextarea title="Mission" value={form.mission} onChange={(value) => updateField('mission', value)} rows={3} onGenerate={(topic) => generateFieldWithAI('mission', 'Mission', form.mission, 'Use only an official mission statement explicitly included in the report. If none is provided, state that more information is needed; do not create one.', topic)} generating={aiGenerating === 'mission'} />
                   </label>
                 </div>
                 <div className="grid gap-3 sm:gap-5 md:grid-cols-3">
@@ -3108,7 +3126,7 @@ export default function Home() {
                   </label>
                   <label className="block text-xs sm:text-sm font-medium text-slate-200">
                     <span className="text-violet-300/70 text-[10px] uppercase tracking-wider block mb-1">Core Values</span>
-                    <ExpandableTextarea title="Core Values" value={form.coreValues} onChange={(value) => updateField('coreValues', value)} rows={3} onGenerate={(topic) => generateFieldWithAI('coreValues', 'Core Values', form.coreValues, 'Write concise core values aligned with the organization and public service data.', topic)} generating={aiGenerating === 'coreValues'} />
+                    <ExpandableTextarea title="Core Values" value={form.coreValues} onChange={(value) => updateField('coreValues', value)} rows={3} onGenerate={(topic) => generateFieldWithAI('coreValues', 'Core Values', form.coreValues, 'Use only official core values explicitly provided in the report. If none are provided, state that more information is needed; do not infer them from the organization.', topic)} generating={aiGenerating === 'coreValues'} />
                   </label>
                   <label className="block text-xs sm:text-sm font-medium text-slate-200">
                     <span className="text-orange-300/70 text-[10px] uppercase tracking-wider block mb-1">
@@ -3195,11 +3213,11 @@ export default function Home() {
               <div className="space-y-4 sm:space-y-5">
                 <label className="block text-xs sm:text-sm font-medium text-slate-200">
                   <span className="text-emerald-300/70 text-[10px] uppercase tracking-wider block mb-1">Assigned Tasks</span>
-                  <ExpandableTextarea title="Assigned Tasks" value={form.tasks} onChange={(value) => updateField('tasks', value)} rows={4} onGenerate={(topic) => generateFieldWithAI('tasks', 'Assigned Tasks and Responsibilities', form.tasks, 'Write a formal paragraph describing assigned tasks, responsibilities, and learning value.', topic)} generating={aiGenerating === 'tasks'} />
+                  <ExpandableTextarea title="Assigned Tasks" value={form.tasks} onChange={(value) => updateField('tasks', value)} rows={4} onGenerate={(topic) => generateFieldWithAI('tasks', 'Assigned Tasks and Responsibilities', form.tasks, 'Rewrite only the tasks and responsibilities stated in the report. Do not add a learning outcome unless one is provided.', topic)} generating={aiGenerating === 'tasks'} />
                 </label>
                 <label className="block text-xs sm:text-sm font-medium text-slate-200">
                   <span className="text-blue-300/70 text-[10px] uppercase tracking-wider block mb-1">Procedures Conformed</span>
-                  <ExpandableTextarea title="Procedures Conformed" value={form.procedures} onChange={(value) => updateField('procedures', value)} rows={4} onGenerate={(topic) => generateFieldWithAI('procedures', 'Duties and Procedures Conformed', form.procedures, 'Write a formal paragraph about the procedures, standards, and conduct followed.', topic)} generating={aiGenerating === 'procedures'} />
+                  <ExpandableTextarea title="Procedures Conformed" value={form.procedures} onChange={(value) => updateField('procedures', value)} rows={4} onGenerate={(topic) => generateFieldWithAI('procedures', 'Duties and Procedures Conformed', form.procedures, 'Describe only procedures, standards, or conduct explicitly stated as followed in the report. Do not assume common workplace procedures.', topic)} generating={aiGenerating === 'procedures'} />
                 </label>
               </div>
             </SectionBlock>
@@ -3209,19 +3227,19 @@ export default function Home() {
                 <div className="grid gap-3 sm:gap-5 md:grid-cols-2">
                   <label className="block text-xs sm:text-sm font-medium text-slate-200">
                     <span className="text-rose-300/70 text-[10px] uppercase tracking-wider block mb-1">Problem 1</span>
-                    <ExpandableTextarea title="Problem 1" value={form.issue1} onChange={(value) => updateField('issue1', value)} rows={4} onGenerate={(topic) => generateFieldWithAI('issue1', 'Issue / Problem 1', form.issue1, 'Write a clear description of a realistic OJT issue based on the report data.', topic)} generating={aiGenerating === 'issue1'} />
+                    <ExpandableTextarea title="Problem 1" value={form.issue1} onChange={(value) => updateField('issue1', value)} rows={4} onGenerate={(topic) => generateFieldWithAI('issue1', 'Issue / Problem 1', form.issue1, 'Describe only a problem explicitly documented in the report. If none is documented, state that more information is needed; never invent a realistic example.', topic)} generating={aiGenerating === 'issue1'} />
                   </label>
                   <label className="block text-xs sm:text-sm font-medium text-slate-200">
                     <span className="text-emerald-300/70 text-[10px] uppercase tracking-wider block mb-1">Solution 1</span>
-                    <ExpandableTextarea title="Solution 1" value={form.issue1Action} onChange={(value) => updateField('issue1Action', value)} rows={4} onGenerate={(topic) => generateFieldWithAI('issue1Action', 'Strategy / Action for Problem 1', form.issue1Action, 'Write a systematic description of the actions taken to resolve the issue.', topic)} generating={aiGenerating === 'issue1Action'} />
+                    <ExpandableTextarea title="Solution 1" value={form.issue1Action} onChange={(value) => updateField('issue1Action', value)} rows={4} onGenerate={(topic) => generateFieldWithAI('issue1Action', 'Strategy / Action for Problem 1', form.issue1Action, 'Describe only actions explicitly recorded as taken. Do not invent a solution, steps, or successful outcome.', topic)} generating={aiGenerating === 'issue1Action'} />
                   </label>
                   <label className="block text-xs sm:text-sm font-medium text-slate-200">
                     <span className="text-rose-300/70 text-[10px] uppercase tracking-wider block mb-1">Problem 2</span>
-                    <ExpandableTextarea title="Problem 2" value={form.issue2} onChange={(value) => updateField('issue2', value)} rows={4} onGenerate={(topic) => generateFieldWithAI('issue2', 'Issue / Problem 2', form.issue2, 'Write a clear description of a second realistic OJT issue based on the report data.', topic)} generating={aiGenerating === 'issue2'} />
+                    <ExpandableTextarea title="Problem 2" value={form.issue2} onChange={(value) => updateField('issue2', value)} rows={4} onGenerate={(topic) => generateFieldWithAI('issue2', 'Issue / Problem 2', form.issue2, 'Describe only a second problem explicitly documented in the report. If none is documented, state that more information is needed; never invent an example.', topic)} generating={aiGenerating === 'issue2'} />
                   </label>
                   <label className="block text-xs sm:text-sm font-medium text-slate-200">
                     <span className="text-emerald-300/70 text-[10px] uppercase tracking-wider block mb-1">Solution 2</span>
-                    <ExpandableTextarea title="Solution 2" value={form.issue2Action} onChange={(value) => updateField('issue2Action', value)} rows={4} onGenerate={(topic) => generateFieldWithAI('issue2Action', 'Strategy / Action for Problem 2', form.issue2Action, 'Write a systematic description of the actions taken to resolve the second issue.', topic)} generating={aiGenerating === 'issue2Action'} />
+                    <ExpandableTextarea title="Solution 2" value={form.issue2Action} onChange={(value) => updateField('issue2Action', value)} rows={4} onGenerate={(topic) => generateFieldWithAI('issue2Action', 'Strategy / Action for Problem 2', form.issue2Action, 'Describe only actions explicitly recorded as taken for the second problem. Do not invent a solution, steps, or successful outcome.', topic)} generating={aiGenerating === 'issue2Action'} />
                   </label>
                 </div>
                 <label className="block text-xs sm:text-sm font-medium text-slate-200">
@@ -3235,7 +3253,7 @@ export default function Home() {
               <div className="space-y-4 sm:space-y-5">
                 <label className="block text-xs sm:text-sm font-medium text-slate-200">
                   <span className="text-violet-300/70 text-[10px] uppercase tracking-wider block mb-1">Self-Evaluation</span>
-                  <ExpandableTextarea title="Self-Evaluation" value={form.selfEvaluation} onChange={(value) => updateField('selfEvaluation', value)} rows={4} onGenerate={(topic) => generateFieldWithAI('selfEvaluation', 'Self-Evaluation', form.selfEvaluation, 'Write a first-person OJT self-evaluation covering growth, skills, and professional development.', topic)} generating={aiGenerating === 'selfEvaluation'} />
+                  <ExpandableTextarea title="Self-Evaluation" value={form.selfEvaluation} onChange={(value) => updateField('selfEvaluation', value)} rows={4} onGenerate={(topic) => generateFieldWithAI('selfEvaluation', 'Self-Evaluation', form.selfEvaluation, 'Write in first person using only reflections, skills, and growth explicitly supported by the report. Do not claim a skill or experience that is not documented.', topic)} generating={aiGenerating === 'selfEvaluation'} />
                 </label>
                 <label className="block text-xs sm:text-sm font-medium text-slate-200">
                   <span className="text-violet-300/70 text-[10px] uppercase tracking-wider block mb-1">
@@ -3887,7 +3905,7 @@ function ExpandableTextarea({
   const [isOpen, setIsOpen] = useState(false);
   const [draft, setDraft] = useState(value);
   const [generationTopic, setGenerationTopic] = useState('');
-  const [showGenerationFocus, setShowGenerationFocus] = useState(false);
+  const [generationError, setGenerationError] = useState('');
 
   useEffect(() => {
     if (!isOpen) return;
@@ -3906,7 +3924,7 @@ function ExpandableTextarea({
   const openEditor = () => {
     setDraft(value);
     setGenerationTopic('');
-    setShowGenerationFocus(false);
+    setGenerationError('');
     setIsOpen(true);
   };
 
@@ -3952,32 +3970,40 @@ function ExpandableTextarea({
               aria-label={title}
             />
             <footer className="space-y-3 border-t border-slate-800 bg-slate-950 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 sm:px-6 sm:pb-4">
-              {onGenerate && showGenerationFocus && (
+              {onGenerate && (
                 <div>
                   <label htmlFor={`generation-topic-${title}`} className="mb-1.5 block text-[10px] font-bold uppercase tracking-[0.16em] text-violet-300">
-                    Generation focus or main points
+                    Optional generation focus or main points
                   </label>
                   <input
                     id={`generation-topic-${title}`}
-                    autoFocus
                     value={generationTopic}
                     onChange={(event) => setGenerationTopic(event.target.value)}
-                    placeholder="Example: Focus my MISO duties, technical skills, and people helped..."
+                    placeholder="Add details to focus on (optional)"
                     className="w-full rounded-xl border border-violet-400/25 bg-violet-500/[0.06] px-3 py-2.5 text-sm text-slate-100 placeholder:text-slate-500 focus:border-violet-400 focus:outline-none"
                   />
                 </div>
+              )}
+              {generationError && (
+                <p role="alert" className="text-sm text-rose-300">
+                  {generationError}
+                </p>
               )}
               <div className="flex flex-wrap gap-3">
                 {onGenerate && (
                   <button
                     type="button"
                     onClick={async () => {
-                      if (!showGenerationFocus) {
-                        setShowGenerationFocus(true);
-                        return;
+                      setGenerationError('');
+                      try {
+                        const generatedText = await onGenerate(generationTopic);
+                        if (!generatedText?.trim()) {
+                          throw new Error('The AI service returned no text. Please try again.');
+                        }
+                        setDraft(generatedText.trim());
+                      } catch (error) {
+                        setGenerationError(error instanceof Error ? error.message : 'Could not generate text. Please try again.');
                       }
-                      const generatedText = await onGenerate(generationTopic);
-                      if (generatedText) setDraft(generatedText);
                     }}
                     disabled={generating}
                     className="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl border border-violet-400/30 bg-violet-500/10 px-3 text-sm font-semibold text-violet-200 transition hover:bg-violet-500/20 disabled:cursor-wait disabled:opacity-60 sm:flex-none sm:min-w-36"
@@ -3985,9 +4011,7 @@ function ExpandableTextarea({
                     <Sparkles size={15} aria-hidden="true" />
                     {generating
                       ? 'Generating...'
-                      : showGenerationFocus
-                        ? 'Generate content'
-                        : 'Generate with AI'}
+                      : 'Generate with AI'}
                   </button>
                 )}
                 <button
