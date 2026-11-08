@@ -24,7 +24,7 @@ const reportFieldLabels = {
 } as const;
 
 type FieldKey = keyof typeof reportFieldLabels;
-type Provider = 'groq' | 'gemini' | 'deepseek';
+type Provider = 'groq' | 'gemini' | 'deepseek' | 'cloudflare';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -102,11 +102,24 @@ async function providerError(response: Response, provider: Provider): Promise<Er
     const parsed: unknown = JSON.parse(body);
     if (isRecord(parsed) && isRecord(parsed.error) && typeof parsed.error.message === 'string') {
       detail = parsed.error.message;
+    } else if (
+      isRecord(parsed)
+      && Array.isArray(parsed.errors)
+      && isRecord(parsed.errors[0])
+      && typeof parsed.errors[0].message === 'string'
+    ) {
+      detail = parsed.errors[0].message;
     }
   } catch {
     detail = body.slice(0, 300);
   }
-  const providerName = provider === 'groq' ? 'Groq' : provider === 'gemini' ? 'Gemini' : 'DeepSeek';
+  const providerName = provider === 'groq'
+    ? 'Groq'
+    : provider === 'gemini'
+      ? 'Gemini'
+      : provider === 'deepseek'
+        ? 'DeepSeek'
+        : 'Cloudflare Workers AI';
   return new Error(`${providerName} returned HTTP ${response.status}${detail ? `: ${detail.slice(0, 300)}` : '.'}`);
 }
 
@@ -205,6 +218,39 @@ async function requestDeepSeek(prompt: string, apiKey: string): Promise<string> 
   return firstChoice.message.content;
 }
 
+async function requestCloudflare(prompt: string, apiToken: string, accountId: string): Promise<string> {
+  const response = await fetch(
+    `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai/v1/chat/completions`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: process.env.CLOUDFLARE_MODEL || '@cf/meta/llama-3.1-8b-instruct',
+        temperature: 0.4,
+        messages: [
+          { role: 'system', content: 'Write factual, professional internship report drafts. Return only valid JSON.' },
+          { role: 'user', content: prompt },
+        ],
+      }),
+      signal: AbortSignal.timeout(55_000),
+    },
+  );
+
+  if (!response.ok) throw await providerError(response, 'cloudflare');
+  const result: unknown = await response.json();
+  if (!isRecord(result) || !Array.isArray(result.choices)) {
+    throw new Error('Cloudflare Workers AI returned an unexpected response.');
+  }
+  const firstChoice = result.choices[0];
+  if (!isRecord(firstChoice) || !isRecord(firstChoice.message) || typeof firstChoice.message.content !== 'string') {
+    throw new Error('Cloudflare Workers AI returned no generated content.');
+  }
+  return firstChoice.message.content;
+}
+
 function parseJsonContent(content: string): unknown {
   const normalized = content.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
   return JSON.parse(normalized);
@@ -222,27 +268,31 @@ export async function POST(request: Request) {
   }
 
   const configuredProvider = (process.env.AI_PROVIDER || '').trim().toLowerCase();
-  if (configuredProvider && !['groq', 'gemini', 'deepseek'].includes(configuredProvider)) {
+  if (configuredProvider && !['groq', 'gemini', 'deepseek', 'cloudflare'].includes(configuredProvider)) {
     return Response.json({
-      error: 'AI_PROVIDER must be set to "groq", "gemini", or "deepseek".',
+      error: 'AI_PROVIDER must be set to "groq", "gemini", "deepseek", or "cloudflare".',
     }, { status: 500 });
   }
 
-  const providerOrder: Provider[] = configuredProvider === 'deepseek'
-    ? ['deepseek', 'groq', 'gemini']
-    : configuredProvider === 'gemini'
-      ? ['gemini', 'groq', 'deepseek']
-      : ['groq', 'gemini', 'deepseek'];
+  const allProviders: Provider[] = ['groq', 'gemini', 'deepseek', 'cloudflare'];
+  const providerOrder: Provider[] = configuredProvider
+    ? [
+        configuredProvider as Provider,
+        ...allProviders.filter((provider) => provider !== configuredProvider),
+      ]
+    : allProviders;
   const availableProviders = providerOrder.filter((provider) => Boolean(
     provider === 'groq'
       ? process.env.GROQ_API_KEY
       : provider === 'gemini'
         ? process.env.GEMINI_API_KEY
-        : process.env.DEEPSEEK_API_KEY
+        : provider === 'deepseek'
+          ? process.env.DEEPSEEK_API_KEY
+          : process.env.CLOUDFLARE_API_TOKEN && process.env.CLOUDFLARE_ACCOUNT_ID
   ));
   if (availableProviders.length === 0) {
     return Response.json({
-      error: 'Configure GROQ_API_KEY, GEMINI_API_KEY, or DEEPSEEK_API_KEY on the server to enable AI drafting.',
+      error: 'Configure GROQ_API_KEY, GEMINI_API_KEY, DEEPSEEK_API_KEY, or both CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID on the server to enable AI drafting.',
     }, { status: 503 });
   }
 
@@ -295,13 +345,17 @@ export async function POST(request: Request) {
         ? process.env.GROQ_API_KEY
         : provider === 'gemini'
           ? process.env.GEMINI_API_KEY
-          : process.env.DEEPSEEK_API_KEY;
+          : provider === 'deepseek'
+            ? process.env.DEEPSEEK_API_KEY
+            : process.env.CLOUDFLARE_API_TOKEN;
       if (!apiKey) continue;
       const content = provider === 'groq'
         ? await requestGroq(prompt, apiKey)
         : provider === 'gemini'
           ? await requestGemini(prompt, apiKey)
-          : await requestDeepSeek(prompt, apiKey);
+          : provider === 'deepseek'
+            ? await requestDeepSeek(prompt, apiKey)
+            : await requestCloudflare(prompt, apiKey, process.env.CLOUDFLARE_ACCOUNT_ID || '');
       const generated: unknown = parseJsonContent(content);
       if (!isRecord(generated)) throw new Error('The AI response was not a JSON object.');
 
