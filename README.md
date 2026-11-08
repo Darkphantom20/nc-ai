@@ -34,7 +34,7 @@ CLOUDFLARE_API_TOKEN=your-cloudflare-api-token
 AI_PROVIDER=cloudflare
 ```
 
-When multiple providers are configured, generation tries the selected provider first and automatically falls back to the others. Set `AI_PROVIDER` to `groq`, `gemini`, `deepseek`, or `cloudflare` to choose the first provider. Without it, section generation rotates the initial provider, while full-report drafting defaults to Groq, then Gemini, DeepSeek, and Cloudflare. Optional model overrides are `GROQ_MODEL`, `GEMINI_MODEL`, `DEEPSEEK_MODEL`, and `CLOUDFLARE_MODEL` (Cloudflare defaults to `@cf/meta/llama-3.1-8b-instruct`). Restart the development server after changing environment variables. For Vercel, add the same variables under the project's Environment Variables settings and redeploy.
+When multiple providers are configured, generation tries the selected provider first and automatically falls back to the others. Set `AI_PROVIDER` to `groq`, `gemini`, `deepseek`, or `cloudflare` to choose the first provider. Without it, section generation rotates the initial provider, while full-report drafting defaults to Groq, then Gemini, DeepSeek, and Cloudflare. Optional model overrides are `GROQ_MODEL`, `GEMINI_MODEL`, `DEEPSEEK_MODEL`, and `CLOUDFLARE_MODEL` (Cloudflare defaults to `@cf/meta/llama-4-scout-17b-16e-instruct`). If Cloudflare rejects a configured model as deprecated, the AI routes retry with that current Llama model. Restart the development server after changing environment variables. For Vercel, add the same variables under the project's Environment Variables settings and redeploy.
 
 Cloudflare Workers AI requires both the account ID and an API token with Workers AI Read and Edit permissions. Keep both values server-side; never use a `NEXT_PUBLIC_` prefix. Cloudflare's free usage allocation is limited and subject to account and service limits, so generation is not unlimited. The selected provider can fall back to another configured provider if Cloudflare is unavailable.
 
@@ -81,7 +81,7 @@ CLOUDFLARE_ACCOUNT_ID=your-cloudflare-account-id
 CLOUDFLARE_API_TOKEN=your-cloudflare-api-token
 AI_PROVIDER=cloudflare
 # Optional model override:
-CLOUDFLARE_MODEL=@cf/meta/llama-3.1-8b-instruct
+CLOUDFLARE_MODEL=@cf/meta/llama-4-scout-17b-16e-instruct
 ```
 
 Both AI routes use Cloudflare's chat-completions API. `AI_PROVIDER=cloudflare` prioritizes Cloudflare; other configured providers remain available as fallbacks. Cloudflare Workers AI has a limited free usage allocation and may impose additional limits; check Cloudflare's current pricing and account terms. For Vercel, add these values under **Project Settings → Environment Variables** and redeploy. Do not expose either credential to client-side code.

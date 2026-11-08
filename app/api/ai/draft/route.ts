@@ -1,3 +1,5 @@
+import { DEFAULT_CLOUDFLARE_MODEL, requestCloudflareChatCompletion } from '../../../../lib/cloudflare-ai';
+
 export const runtime = 'nodejs';
 
 const reportFieldLabels = {
@@ -219,34 +221,23 @@ async function requestDeepSeek(prompt: string, apiKey: string): Promise<string> 
 }
 
 async function requestCloudflare(prompt: string, apiToken: string, accountId: string): Promise<string> {
-  const response = await fetch(
-    `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai/v1/chat/completions`,
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: process.env.CLOUDFLARE_MODEL || '@cf/meta/llama-3.1-8b-instruct',
-        temperature: 0.4,
-        messages: [
-          { role: 'system', content: 'Write factual, professional internship report drafts. Return only valid JSON.' },
-          { role: 'user', content: prompt },
-        ],
-      }),
-      signal: AbortSignal.timeout(55_000),
-    },
+  const { response, result } = await requestCloudflareChatCompletion(
+    accountId,
+    apiToken,
+    [
+      { role: 'system', content: 'Write factual, professional internship report drafts. Return only valid JSON.' },
+      { role: 'user', content: prompt },
+    ],
+    { temperature: 0.4 },
   );
 
   if (!response.ok) throw await providerError(response, 'cloudflare');
-  const result: unknown = await response.json();
   if (!isRecord(result) || !Array.isArray(result.choices)) {
     throw new Error('Cloudflare Workers AI returned an unexpected response.');
   }
   const firstChoice = result.choices[0];
   if (!isRecord(firstChoice) || !isRecord(firstChoice.message) || typeof firstChoice.message.content !== 'string') {
-    throw new Error('Cloudflare Workers AI returned no generated content.');
+    throw new Error(`Cloudflare Workers AI returned no generated content with model ${process.env.CLOUDFLARE_MODEL || DEFAULT_CLOUDFLARE_MODEL}.`);
   }
   return firstChoice.message.content;
 }
