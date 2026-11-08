@@ -268,6 +268,28 @@ function userProvidedText(value: string, example: string, maxLength = 1000): str
   return text && text !== example.trim() ? text : '';
 }
 
+function getUserJournalActivities(form: NarrativeForm, selectedWeekIndex?: number) {
+  return form.appendices.dailyJournal.flatMap((week, weekIndex) => {
+    if (selectedWeekIndex !== undefined && weekIndex !== selectedWeekIndex) return [];
+    return week.activities.flatMap((activity, activityIndex) => {
+      const example = defaultForm.appendices.dailyJournal[weekIndex]?.activities[activityIndex];
+      if (example && activity.day === example.day
+        && activity.date === example.date
+        && activity.accomplishment === example.accomplishment
+        && activity.hours === example.hours) return [];
+      const accomplishment = aiText(activity.accomplishment, 300);
+      if (!accomplishment) return [];
+      return [{
+        weekNumber: week.weekNumber,
+        day: aiText(activity.day, 40),
+        date: aiText(activity.date, 40),
+        accomplishment,
+        hours: activity.hours,
+      }];
+    });
+  }).slice(0, 100);
+}
+
 function buildAISectionContext(form: NarrativeForm, targetKey: AiGenerationFieldKey): Record<string, unknown> {
   const relatedSections = Object.fromEntries(
     (Object.keys(aiNarrativeFieldLabels) as (keyof typeof aiNarrativeFieldLabels)[])
@@ -277,34 +299,25 @@ function buildAISectionContext(form: NarrativeForm, targetKey: AiGenerationField
         return text ? [[aiNarrativeFieldLabels[key], text]] : [];
       }),
   );
-  const dailyJournal = form.appendices.dailyJournal.flatMap((week, weekIndex) => (
-    week.activities.flatMap((activity, activityIndex) => {
-      const example = defaultForm.appendices.dailyJournal[weekIndex]?.activities[activityIndex];
-      if (example && activity.day === example.day
-        && activity.date === example.date
-        && activity.accomplishment === example.accomplishment
-        && activity.hours === example.hours) return [];
-      const accomplishment = aiText(activity.accomplishment, 300);
-      if (!accomplishment) return [];
-      return [{
-        day: aiText(activity.day, 40),
-        date: aiText(activity.date, 40),
-        accomplishment,
-        hours: activity.hours,
-      }];
-    })
-  )).slice(0, 100);
+  const weeklyJournal = form.appendices.dailyJournal.flatMap((week, weekIndex) => {
+    const exampleNarrative = defaultForm.appendices.dailyJournal[weekIndex]?.narrative || '';
+    const narrative = userProvidedText(week.narrative, exampleNarrative, 500);
+    const activities = getUserJournalActivities(form, weekIndex);
+    return activities.length || narrative
+      ? [{ weekNumber: week.weekNumber, ...(narrative ? { narrative } : {}), activities }]
+      : [];
+  });
 
   const organization = userProvidedText(form.trainingOrganization, defaultForm.trainingOrganization, 200);
   const location = userProvidedText(form.trainingLocation, defaultForm.trainingLocation, 200);
   const degreeProgram = userProvidedText(form.degreeProgram, defaultForm.degreeProgram, 200);
 
   return {
+    weeklyJournal,
     ...(organization ? { trainingOrganization: organization } : {}),
     ...(location ? { trainingLocation: location } : {}),
     ...(degreeProgram ? { degreeProgram } : {}),
     relatedSections,
-    dailyJournal,
   };
 }
 
@@ -2311,28 +2324,44 @@ export default function Home() {
     setAiDraftError('');
     setStatus('Drafting report text with AI...');
     try {
-      const selectFields = (source: Record<AiNarrativeFieldKey, string>) =>
+      const selectFields = (
+        source: Record<AiNarrativeFieldKey, string>,
+        examples: Record<AiNarrativeFieldKey, string>,
+      ) =>
         Object.fromEntries(
-          (Object.keys(aiNarrativeFieldLabels) as AiNarrativeFieldKey[]).map((key) => [key, source[key]])
+          (Object.keys(aiNarrativeFieldLabels) as AiNarrativeFieldKey[])
+            .map((key) => [key, userProvidedText(source[key], examples[key], 4000)])
         );
       const requestBody = {
-        organization: form.trainingOrganization,
-        location: form.trainingLocation,
-        degreeProgram: form.degreeProgram,
-        yearLevel: form.studentYear,
-        trainingDuration: form.trainingDuration,
-        report: selectFields(form),
-        dailyJournal: form.appendices.dailyJournal.flatMap((week) => week.activities.map((activity) => ({
-          day: activity.day,
-          date: activity.date,
-          accomplishment: activity.accomplishment,
-        }))),
+        organization: userProvidedText(form.trainingOrganization, defaultForm.trainingOrganization, 300),
+        location: userProvidedText(form.trainingLocation, defaultForm.trainingLocation, 300),
+        degreeProgram: userProvidedText(form.degreeProgram, defaultForm.degreeProgram, 300),
+        yearLevel: userProvidedText(form.studentYear, defaultForm.studentYear, 100),
+        trainingDuration: userProvidedText(form.trainingDuration, defaultForm.trainingDuration, 300),
+        report: selectFields(form, defaultForm),
+        dailyJournal: getUserJournalActivities(form),
+        weeklyNarratives: form.appendices.dailyJournal.flatMap((week, weekIndex) => {
+          const narrative = userProvidedText(
+            week.narrative,
+            defaultForm.appendices.dailyJournal[weekIndex]?.narrative || '',
+            1000,
+          );
+          return narrative ? [{ weekNumber: week.weekNumber, narrative }] : [];
+        }),
         schoolPlacement: form.schoolPlacement.enabled
           ? {
               enabled: true,
-              organization: form.schoolPlacement.trainingOrganization,
-              location: form.schoolPlacement.trainingLocation,
-              details: selectFields(form.schoolPlacement),
+              organization: userProvidedText(
+                form.schoolPlacement.trainingOrganization,
+                defaultForm.schoolPlacement.trainingOrganization,
+                300,
+              ),
+              location: userProvidedText(
+                form.schoolPlacement.trainingLocation,
+                defaultForm.schoolPlacement.trainingLocation,
+                300,
+              ),
+              details: selectFields(form.schoolPlacement, defaultForm.schoolPlacement),
             }
           : { enabled: false },
       };

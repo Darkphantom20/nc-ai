@@ -108,10 +108,16 @@ export async function POST(request: Request) {
     let sourceDetails = '';
     if (body.sourceDetails !== undefined && body.sourceDetails !== null) {
       try {
-        sourceDetails = JSON.stringify(body.sourceDetails).slice(0, 12000);
+        sourceDetails = JSON.stringify(body.sourceDetails);
       } catch {
         return NextResponse.json({ error: 'Source details must be valid JSON data.' }, { status: 400 });
       }
+    }
+    if (sourceDetails.length > 50000) {
+      return NextResponse.json(
+        { error: 'Journal and report details exceed the AI context limit. Shorten the entries and try again.' },
+        { status: 413 },
+      );
     }
     if (!currentText.trim() && !focus && !hasSourceDetails(body.sourceDetails)) {
       return NextResponse.json(
@@ -124,7 +130,8 @@ export async function POST(request: Request) {
     const prompt = [
       'You are a careful academic writing assistant for an On-the-Job Training (OJT) narrative report.',
       `Section: ${title}`,
-      'Use only the current section text, the optional user focus, and source details supplied below as factual evidence. Other user-provided sections are context: use them only when directly relevant to align this section with the user’s actual tasks and experience.',
+      'Use only the current section text, the optional user focus, and source details supplied below as factual evidence. The weeklyJournal entries and weekly narratives are the primary source for the student’s actual work; base relevant tasks, duties, procedures, problems, actions, results, lessons, and reflections on them. Other user-provided sections are supporting context: use them only when directly relevant and never let generic sample text override the journal.',
+      'Weekly journal activities do not establish official organization facts. For organization background, vision, mission, objectives, core values, or services, rely only on explicit organization details and ask for official wording when it is missing.',
       'The title and additional writing instructions describe the task; they are not evidence of facts.',
       'Follow the user’s actual field and duties. Do not assume the placement is IT-related: never introduce IT, technology, healthcare, banking, business, education, or other industry-specific terms unless those details appear in the supplied factual evidence.',
       'Do not infer or invent names, people thanked, roles, dates, duties, procedures, policies, problems, causes, actions, results, achievements, skills, statistics, official statements, or personal experiences.',
