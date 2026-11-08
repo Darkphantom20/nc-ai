@@ -3341,7 +3341,7 @@ export default function Home() {
                 <div className="grid gap-3 sm:gap-5 md:grid-cols-2">
                   <label className="block text-xs sm:text-sm font-medium text-slate-200">
                     <span className="text-rose-300/70 text-[10px] uppercase tracking-wider block mb-1">Problem 1</span>
-                    <ExpandableTextarea title="Problem 1" value={form.issue1} onChange={(value) => updateField('issue1', value)} rows={4} onGenerate={(topic) => generateFieldWithAI('issue1', 'Issue / Problem 1', form.issue1, 'Describe only a problem explicitly documented in the report. If none is documented, state that more information is needed; never invent a realistic example.', topic)} generating={aiGenerating === 'issue1'} />
+                    <ExpandableTextarea title="Problem 1" value={form.issue1} onChange={(value) => updateField('issue1', value)} rows={4} onGenerate={(topic) => generateFieldWithAI('issue1', 'Issue / Problem 1', form.issue1, 'Use a documented problem if present. Otherwise, derive one concise potential challenge from the task and objects in the weekly journal, and label it potential, not confirmed. Example: “helped arrange documents and papers” supports “A potential challenge was organizing the documents and papers clearly.” Do not add unstated reasons, setting, systems, standards, policies, protocols, requirements, failures, effects, mistakes, losses, delays, or consequences. If no concrete task supports a challenge, ask for more details.', topic)} generating={aiGenerating === 'issue1'} />
                   </label>
                   <label className="block text-xs sm:text-sm font-medium text-slate-200">
                     <span className="text-emerald-300/70 text-[10px] uppercase tracking-wider block mb-1">Solution 1</span>
@@ -3349,7 +3349,7 @@ export default function Home() {
                   </label>
                   <label className="block text-xs sm:text-sm font-medium text-slate-200">
                     <span className="text-rose-300/70 text-[10px] uppercase tracking-wider block mb-1">Problem 2</span>
-                    <ExpandableTextarea title="Problem 2" value={form.issue2} onChange={(value) => updateField('issue2', value)} rows={4} onGenerate={(topic) => generateFieldWithAI('issue2', 'Issue / Problem 2', form.issue2, 'Describe only a second problem explicitly documented in the report. If none is documented, state that more information is needed; never invent an example.', topic)} generating={aiGenerating === 'issue2'} />
+                    <ExpandableTextarea title="Problem 2" value={form.issue2} onChange={(value) => updateField('issue2', value)} rows={4} onGenerate={(topic) => generateFieldWithAI('issue2', 'Issue / Problem 2', form.issue2, 'Use a different explicitly documented problem or a distinct journal task. If you derive a challenge from a task, label it potential, keep it concise, and use only the task and objects named in the journal. Do not add unstated context, policies, standards, effects, or consequences. Do not repeat Problem 1. If no distinct issue is supported, ask for more details.', topic)} generating={aiGenerating === 'issue2'} />
                   </label>
                   <label className="block text-xs sm:text-sm font-medium text-slate-200">
                     <span className="text-emerald-300/70 text-[10px] uppercase tracking-wider block mb-1">Solution 2</span>

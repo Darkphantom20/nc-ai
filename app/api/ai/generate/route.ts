@@ -92,6 +92,7 @@ export async function POST(request: Request) {
     const focus = String(body.focus || '').trim().slice(0, 2000);
     const instructions = String(body.instructions || '').slice(0, 2000);
     const acknowledgementRequest = /acknowledg(?:e)?ment/i.test(title);
+    const issueRequest = /^(?:issue\s*\/\s*problem|problem)\s*[12]?$/i.test(title);
     const outputUnit = body.outputUnit === undefined || body.outputUnit === 'paragraphs'
       ? 'paragraphs'
       : body.outputUnit === 'sentences'
@@ -134,10 +135,17 @@ export async function POST(request: Request) {
       'Weekly journal activities do not establish official organization facts. For organization background, vision, mission, objectives, core values, or services, rely only on explicit organization details and ask for official wording when it is missing.',
       'The title and additional writing instructions describe the task; they are not evidence of facts.',
       'Follow the user’s actual field and duties. Do not assume the placement is IT-related: never introduce IT, technology, healthcare, banking, business, education, or other industry-specific terms unless those details appear in the supplied factual evidence.',
-      'Do not infer or invent names, people thanked, roles, dates, duties, procedures, policies, problems, causes, actions, results, achievements, skills, statistics, official statements, or personal experiences.',
-      'For acknowledgements, use related task details to align the wording with the user’s actual experience. Never invent who is being thanked or claim anyone provided support unless the source explicitly names them and their contribution. If no recipient and contribution are supplied, do not express thanks or claim guidance, support, opportunity, growth, or learning; use neutral statements grounded only in supplied work facts, and include a sentence asking the user to add the names and contributions they want acknowledged. Do not treat a role, workplace, branch, or organization as an acknowledgement recipient unless explicitly identified as one.',
-      'For official vision, mission, objectives, and core-value statements, use only exact source details; if the source lacks them, briefly ask the user to provide the official wording.',
-      'For problems and actions, describe only situations and responses the user actually supplied. Never create a plausible example and present it as an event that happened.',
+      'Do not invent names, people thanked, roles, dates, duties, procedures, policies, unqualified problem claims, causes, actions, results, achievements, skills, statistics, official statements, or personal experiences.',
+      acknowledgementRequest
+        ? 'For acknowledgements, use related task details to align the wording with the user’s actual experience. Never invent who is being thanked or claim anyone provided support unless the source explicitly names them and their contribution. If no recipient and contribution are supplied, do not express thanks or claim guidance, support, opportunity, growth, or learning; use neutral statements grounded only in supplied work facts, and include a sentence asking the user to add the names and contributions they want acknowledged. Do not treat a role, workplace, branch, or organization as an acknowledgement recipient unless explicitly identified as one.'
+        : '',
+      /vision|mission|objectives|core values/i.test(title)
+        ? 'For official vision, mission, objectives, and core-value statements, use only exact source details; if the source lacks them, briefly ask the user to provide the official wording.'
+        : '',
+      issueRequest
+        ? 'For this issue field, use an explicitly documented issue if one is in the journal. Otherwise, describe one potential challenge directly related to a concrete journal task, and clearly label it as potential rather than a confirmed event. Keep it to the task and objects named in the journal: add no unstated reasons, setting, systems, standards, policies, protocols, requirements, failures, effects, or consequences. For example, a journal entry saying “helped arrange documents and papers” supports “A potential challenge was organizing the documents and papers clearly,” but does not support claims about misfiling, compliance, or retrieval. If no concrete task is documented, ask for more information.'
+        : '',
+      'For solution/action sections, describe actions as completed only when the user documented them. If only a potential challenge is supported, a suggested response may be offered only when clearly labeled as a recommendation, not an action already taken.',
       'Rewrite the supplied details clearly without changing their meaning or adding generic filler.',
       'Use first-person language when the section naturally describes the student experience. Otherwise use a formal academic or organizational voice.',
       `Output exactly ${outputCount} ${outputUnit}. If sentences are requested, return exactly that many complete sentences in one paragraph. If paragraphs are requested, return exactly that many non-empty paragraphs separated by one blank line, with 1 to 3 concise sentences per paragraph.`,
