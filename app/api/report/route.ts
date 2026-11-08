@@ -246,7 +246,7 @@ export async function POST(request: Request) {
       documentSections.splice(
         0,
         documentSections.length,
-        ...buildDocxTemplateSections(data),
+        ...buildDocxTemplateSections(data, compactSectionLayout),
       );
     }
 
@@ -483,7 +483,13 @@ function buildTemplateDailyJournal(appendices: AppendicesData | undefined): (Par
   return children;
 }
 
-function buildTemplateOrganizationPages(label: string, source: any, romanLabel = '', figureNumber = 1): Paragraph[] {
+function buildTemplateOrganizationPages(
+  label: string,
+  source: any,
+  romanLabel = '',
+  figureNumber = 1,
+  compact = false,
+): Paragraph[] {
   const children: Paragraph[] = [
     new Paragraph({
       pageBreakBefore: true,
@@ -555,7 +561,7 @@ function buildTemplateOrganizationPages(label: string, source: any, romanLabel =
   }
 
   children.push(
-    new Paragraph({ pageBreakBefore: true }),
+    new Paragraph({ pageBreakBefore: !compact }),
     ...templateParagraph('ORGANIZATION / COMPANY ANALYSIS', { alignment: AlignmentType.CENTER, bold: true }),
   );
   addSubheading('Strengths');
@@ -570,7 +576,7 @@ function buildTemplateOrganizationPages(label: string, source: any, romanLabel =
   addText(source.recommendations, true);
 
   children.push(
-    new Paragraph({ pageBreakBefore: true }),
+    new Paragraph({ pageBreakBefore: !compact }),
     ...templateParagraph('TASKS AND DUTIES', { alignment: AlignmentType.CENTER, bold: true }),
   );
   addSubheading('Assigned Tasks and Responsibilities');
@@ -579,7 +585,7 @@ function buildTemplateOrganizationPages(label: string, source: any, romanLabel =
   addText(source.procedures, true);
 
   children.push(
-    new Paragraph({ pageBreakBefore: true }),
+    new Paragraph({ pageBreakBefore: !compact }),
     ...templateParagraph('CASE ANALYSIS', { alignment: AlignmentType.CENTER, bold: true }),
   );
   addSubheading('Issue / Problem 1');
@@ -594,7 +600,7 @@ function buildTemplateOrganizationPages(label: string, source: any, romanLabel =
   addText(source.lessons);
 
   children.push(
-    new Paragraph({ pageBreakBefore: true }),
+    new Paragraph({ pageBreakBefore: !compact }),
     ...templateParagraph('REFLECTIONS', { alignment: AlignmentType.CENTER, bold: true }),
   );
   addSubheading('Self-Evaluation');
@@ -605,7 +611,7 @@ function buildTemplateOrganizationPages(label: string, source: any, romanLabel =
   return children;
 }
 
-function buildDocxTemplateSections(data: any): any[] {
+function buildDocxTemplateSections(data: any, compact = false): any[] {
   const children: (Paragraph | Table)[] = [
     ...buildTemplateCoverPage(data),
     new Paragraph({ pageBreakBefore: true }),
@@ -642,9 +648,15 @@ function buildDocxTemplateSections(data: any): any[] {
     children.push(...templateParagraph('Figure 4: PRIME report photos', {}));
   }
 
-  children.push(...buildTemplateOrganizationPages(data.trainingOrganization, data, 'I', 1));
+  children.push(...buildTemplateOrganizationPages(data.trainingOrganization, data, 'I', 1, compact));
   if (data.schoolPlacement?.enabled) {
-    children.push(...buildTemplateOrganizationPages(data.schoolPlacement.trainingOrganization || 'SCHOOL OJT / SECOND PLACEMENT', data.schoolPlacement, 'II', 2));
+    children.push(...buildTemplateOrganizationPages(
+      data.schoolPlacement.trainingOrganization || 'SCHOOL OJT / SECOND PLACEMENT',
+      data.schoolPlacement,
+      'II',
+      2,
+      compact,
+    ));
   }
 
   const journalChildren = buildTemplateDailyJournal(data.appendices);

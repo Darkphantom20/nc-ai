@@ -291,26 +291,86 @@ function getUserJournalActivities(form: NarrativeForm, selectedWeekIndex?: numbe
 }
 
 function buildAISectionContext(form: NarrativeForm, targetKey: AiGenerationFieldKey): Record<string, unknown> {
+  const organizationFields: AiNarrativeFieldKey[] = [
+    'background',
+    'vision',
+    'mission',
+    'objectives',
+    'coreValues',
+    'services',
+  ];
+  const organizationAnalysisFields: AiNarrativeFieldKey[] = [
+    'strengths',
+    'weaknesses',
+    'opportunities',
+    'threats',
+    'recommendations',
+  ];
+  const taskFields: AiNarrativeFieldKey[] = ['tasks', 'procedures'];
+  const caseFields: AiNarrativeFieldKey[] = ['issue1', 'issue1Action', 'issue2', 'issue2Action'];
+  let contextFields: AiNarrativeFieldKey[];
+  let includeJournal = false;
+
+  if (targetKey === 'acknowledgement' || targetKey === 'lessons'
+    || targetKey === 'selfEvaluation' || targetKey === 'relevancy') {
+    contextFields = [...taskFields, ...caseFields, 'lessons', 'selfEvaluation', 'relevancy'];
+    includeJournal = true;
+  } else if (targetKey === 'tasks' || targetKey === 'procedures') {
+    contextFields = taskFields;
+    includeJournal = true;
+  } else if (targetKey === 'issue1' || targetKey === 'issue2') {
+    contextFields = [...taskFields, ...(targetKey === 'issue2' ? ['issue1' as const] : [])];
+    includeJournal = true;
+  } else if (targetKey === 'issue1Action' || targetKey === 'issue2Action') {
+    contextFields = [...taskFields, targetKey === 'issue1Action' ? 'issue1' : 'issue2'];
+    includeJournal = true;
+  } else if (organizationAnalysisFields.includes(targetKey)) {
+    contextFields = [...organizationFields, ...organizationAnalysisFields];
+  } else {
+    contextFields = organizationFields;
+  }
+
   const relatedSections = Object.fromEntries(
-    (Object.keys(aiNarrativeFieldLabels) as (keyof typeof aiNarrativeFieldLabels)[])
+    contextFields
       .filter((key) => key !== targetKey)
       .flatMap((key) => {
-        const text = userProvidedText(form[key], defaultForm[key]);
+        const text = userProvidedText(form[key], defaultForm[key], 700);
         return text ? [[aiNarrativeFieldLabels[key], text]] : [];
       }),
   );
-  const weeklyJournal = form.appendices.dailyJournal.flatMap((week, weekIndex) => {
-    const exampleNarrative = defaultForm.appendices.dailyJournal[weekIndex]?.narrative || '';
-    const narrative = userProvidedText(week.narrative, exampleNarrative, 500);
-    const activities = getUserJournalActivities(form, weekIndex);
-    return activities.length || narrative
-      ? [{ weekNumber: week.weekNumber, ...(narrative ? { narrative } : {}), activities }]
-      : [];
-  });
+  const weeklyJournal = includeJournal
+    ? (() => {
+        const weeks = new Map<number, { weekNumber: number; activities: ReturnType<typeof getUserJournalActivities> }>();
+        for (const activity of getUserJournalActivities(form).slice(-60)) {
+          const week = weeks.get(activity.weekNumber) || {
+            weekNumber: activity.weekNumber,
+            activities: [],
+          };
+          week.activities.push(activity);
+          weeks.set(activity.weekNumber, week);
+        }
+        for (let weekIndex = 0; weekIndex < form.appendices.dailyJournal.length; weekIndex += 1) {
+          const week = form.appendices.dailyJournal[weekIndex];
+          if (weeks.size >= 15 && !weeks.has(week.weekNumber)) continue;
+          const exampleNarrative = defaultForm.appendices.dailyJournal[weekIndex]?.narrative || '';
+          const narrative = userProvidedText(week.narrative, exampleNarrative, 350);
+          if (!narrative && !weeks.has(week.weekNumber)) continue;
+          const existingWeek = weeks.get(week.weekNumber) || {
+            weekNumber: week.weekNumber,
+            activities: [],
+          };
+          Object.assign(existingWeek, narrative ? { narrative } : {});
+          weeks.set(week.weekNumber, existingWeek);
+        }
+        return Array.from(weeks.values()).slice(-15);
+      })()
+    : [];
 
   const organization = userProvidedText(form.trainingOrganization, defaultForm.trainingOrganization, 200);
   const location = userProvidedText(form.trainingLocation, defaultForm.trainingLocation, 200);
-  const degreeProgram = userProvidedText(form.degreeProgram, defaultForm.degreeProgram, 200);
+  const degreeProgram = targetKey === 'relevancy'
+    ? userProvidedText(form.degreeProgram, defaultForm.degreeProgram, 200)
+    : '';
 
   return {
     weeklyJournal,
@@ -332,7 +392,7 @@ function buildSchoolPlacementAIContext(
         const value = userProvidedText(
           placement[key],
           defaultForm.schoolPlacement[key],
-          3000,
+          1000,
         );
         return value ? [[aiNarrativeFieldLabels[key], value]] : [];
       }),
@@ -1772,7 +1832,9 @@ export default function Home() {
     sourceDetails: Record<string, unknown>,
     exampleText: string,
   ): Promise<string | null> => {
-    if (aiGenerating) return null;
+    if (aiGenerating) {
+      throw new Error('Another AI generation is already in progress. Wait for it to finish, then try again.');
+    }
     setAiGenerating(generationKey);
     setStatus(`Generating ${title} with AI...`);
     try {
@@ -1846,9 +1908,26 @@ export default function Home() {
     defaultForm.schoolPlacement[key],
   );
 
+  const generatePrimeNarrativeWithAI = (
+    currentText: string,
+    options: AIGenerationOptions,
+  ): Promise<string | null> => requestAIField(
+    'primeNarrative',
+    'PRIME Report Narrative',
+    'PRIME Report Narrative',
+    currentText,
+    'Use only the seminar details in the current text or generation focus. Do not invent dates, topics, speakers, activities, attendance, lessons, or personal outcomes. If the user has not supplied event details, ask them to add them.',
+    options,
+    {},
+    defaultForm.appendices.primeNarrative,
+  );
+
   const generateWeeklyNarrative = async (weekIndex: number, options: AIGenerationOptions): Promise<string | null> => {
     const week = form.appendices.dailyJournal[weekIndex];
-    if (!week || aiGenerating) return null;
+    if (!week) return null;
+    if (aiGenerating) {
+      throw new Error('Another AI generation is already in progress. Wait for it to finish, then try again.');
+    }
     setAiGenerating(`weekly-${weekIndex}`);
     setStatus(`Generating Week ${week.weekNumber} narrative with AI...`);
     try {
@@ -3102,8 +3181,8 @@ export default function Home() {
               className={`${fieldClass} mt-2 normal-case tracking-normal`}
               aria-label="Choose report template"
             >
-              <option value="current">Current System Layout</option>
-              <option value="docx-template">narrative-report.docx Layout</option>
+              <option value="current">Template 1 (Current System Layout)</option>
+              <option value="docx-template">Template 2 (Narrative Report DOCX)</option>
             </select>
             <span className="mt-2 block text-xs font-normal normal-case tracking-normal text-slate-400">
               Choose the structure used for the generated Word report.
@@ -3205,7 +3284,6 @@ export default function Home() {
               </div>
             </SectionBlock>
 
-            {form.reportTemplate !== 'docx-template' && (
             <SectionBlock title="Page Layout Style" className="tour-page-layout">
               <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4 sm:p-5">
                   <p className="mb-3 text-xs text-slate-300">
@@ -3235,7 +3313,6 @@ export default function Home() {
                 </div>
               </div>
             </SectionBlock>
-            )}
 
             <SectionBlock title="1. Acknowledgement" className="tour-acknowledgement">
               <div className="space-y-4 sm:space-y-5">
@@ -3293,7 +3370,7 @@ export default function Home() {
               <div className="space-y-4 sm:space-y-5">
                 <label className="block text-xs sm:text-sm font-medium text-slate-200">
                   <span className="text-cyan-300/70 text-[10px] uppercase tracking-wider block mb-1">Background</span>
-                  <ExpandableTextarea title="Background" value={form.background} onChange={(value) => updateField('background', value)} rows={4} onGenerate={(topic) => generateFieldWithAI('background', 'Background of the Organization', form.background, 'Write an organized background paragraph describing the exact organization, office or department, its role, and relevance to the student training.', topic)} generating={aiGenerating === 'background'} />
+                  <ExpandableTextarea title="Background" value={form.background} onChange={(value) => updateField('background', value)} rows={4} onGenerate={(topic) => generateFieldWithAI('background', 'Background of the Organization', form.background, 'Organize only the organization facts explicitly supplied for this report. Do not infer the office role, history, services, or relevance from its name. If facts are missing, ask the user to provide them.', topic)} generating={aiGenerating === 'background'} />
                 </label>
                 <div className="grid gap-3 sm:gap-5 md:grid-cols-2">
                   <label className="block text-xs sm:text-sm font-medium text-slate-200">
@@ -3308,7 +3385,7 @@ export default function Home() {
                 <div className="grid gap-3 sm:gap-5 md:grid-cols-3">
                   <label className="block text-xs sm:text-sm font-medium text-slate-200">
                     <span className="text-emerald-300/70 text-[10px] uppercase tracking-wider block mb-1">Objectives</span>
-                    <ExpandableTextarea title="Objectives" value={form.objectives} onChange={(value) => updateField('objectives', value)} rows={3} onGenerate={(topic) => generateFieldWithAI('objectives', 'Objectives', form.objectives, 'Write specific objectives as concise paragraph lines without labels or headings.', topic)} generating={aiGenerating === 'objectives'} />
+                    <ExpandableTextarea title="Objectives" value={form.objectives} onChange={(value) => updateField('objectives', value)} rows={3} onGenerate={(topic) => generateFieldWithAI('objectives', 'Objectives', form.objectives, 'Use only objectives explicitly supplied for the organization. Do not create official goals or infer them from the organization name; ask for the source wording if none is provided.', topic)} generating={aiGenerating === 'objectives'} />
                   </label>
                   <label className="block text-xs sm:text-sm font-medium text-slate-200">
                     <span className="text-violet-300/70 text-[10px] uppercase tracking-wider block mb-1">Core Values</span>
@@ -3323,7 +3400,7 @@ export default function Home() {
                       value={form.services}
                       onChange={(value) => updateField('services', value)}
                       rows={3}
-                      onGenerate={(topic) => generateFieldWithAI('services', 'Products and Services Offered', form.services, 'Write a clear paragraph describing the organization products and services from the report data.', topic)}
+                      onGenerate={(topic) => generateFieldWithAI('services', 'Products and Services Offered', form.services, 'Describe only products or services explicitly supplied for the organization. Do not infer services from its name, industry, or student duties; ask for source details if they are missing.', topic)}
                       generating={aiGenerating === 'services'}
                     />
                   </label>
@@ -3373,24 +3450,24 @@ export default function Home() {
                 <div className="grid gap-3 sm:gap-5 md:grid-cols-2">
                   <label className="block text-xs sm:text-sm font-medium text-slate-200">
                     <span className="text-emerald-300/70 text-[10px] uppercase tracking-wider block mb-1">✓ Strengths</span>
-                    <ExpandableTextarea title="Strengths" value={form.strengths} onChange={(value) => updateField('strengths', value)} rows={4} onGenerate={(topic) => generateFieldWithAI('strengths', 'Strengths', form.strengths, 'Write an analytical paragraph identifying organizational strengths supported by the data.', topic)} generating={aiGenerating === 'strengths'} />
+                    <ExpandableTextarea title="Strengths" value={form.strengths} onChange={(value) => updateField('strengths', value)} rows={4} onGenerate={(topic) => generateFieldWithAI('strengths', 'Strengths', form.strengths, 'Rewrite or organize only strengths explicitly supported by supplied organization details. Do not invent staff qualities, resources, performance, or capabilities.', topic)} generating={aiGenerating === 'strengths'} />
                   </label>
                   <label className="block text-xs sm:text-sm font-medium text-slate-200">
                     <span className="text-rose-300/70 text-[10px] uppercase tracking-wider block mb-1">✗ Weaknesses</span>
-                    <ExpandableTextarea title="Weaknesses" value={form.weaknesses} onChange={(value) => updateField('weaknesses', value)} rows={4} onGenerate={(topic) => generateFieldWithAI('weaknesses', 'Weaknesses', form.weaknesses, 'Write an objective organizational weakness analysis without exaggeration.', topic)} generating={aiGenerating === 'weaknesses'} />
+                    <ExpandableTextarea title="Weaknesses" value={form.weaknesses} onChange={(value) => updateField('weaknesses', value)} rows={4} onGenerate={(topic) => generateFieldWithAI('weaknesses', 'Weaknesses', form.weaknesses, 'Rewrite or organize only weaknesses explicitly supported by supplied organization details. Do not assume resource, staffing, or process problems.', topic)} generating={aiGenerating === 'weaknesses'} />
                   </label>
                   <label className="block text-xs sm:text-sm font-medium text-slate-200">
                     <span className="text-cyan-300/70 text-[10px] uppercase tracking-wider block mb-1">◆ Opportunities</span>
-                    <ExpandableTextarea title="Opportunities" value={form.opportunities} onChange={(value) => updateField('opportunities', value)} rows={4} onGenerate={(topic) => generateFieldWithAI('opportunities', 'Opportunities', form.opportunities, 'Write an analytical paragraph about realistic opportunities for improvement.', topic)} generating={aiGenerating === 'opportunities'} />
+                    <ExpandableTextarea title="Opportunities" value={form.opportunities} onChange={(value) => updateField('opportunities', value)} rows={4} onGenerate={(topic) => generateFieldWithAI('opportunities', 'Opportunities', form.opportunities, 'Rewrite only opportunities supported by explicit organization details or user focus. Do not introduce generic trends or assume plans, resources, or needs.', topic)} generating={aiGenerating === 'opportunities'} />
                   </label>
                   <label className="block text-xs sm:text-sm font-medium text-slate-200">
                     <span className="text-yellow-300/70 text-[10px] uppercase tracking-wider block mb-1">⚠ Threats</span>
-                    <ExpandableTextarea title="Threats" value={form.threats} onChange={(value) => updateField('threats', value)} rows={4} onGenerate={(topic) => generateFieldWithAI('threats', 'Threats', form.threats, 'Write an objective paragraph about organizational threats and risks.', topic)} generating={aiGenerating === 'threats'} />
+                    <ExpandableTextarea title="Threats" value={form.threats} onChange={(value) => updateField('threats', value)} rows={4} onGenerate={(topic) => generateFieldWithAI('threats', 'Threats', form.threats, 'Rewrite only threats explicitly supported by supplied organization details. Do not infer risks from generic industry knowledge.', topic)} generating={aiGenerating === 'threats'} />
                   </label>
                 </div>
                 <label className="block text-xs sm:text-sm font-medium text-slate-200">
                   <span className="text-blue-300/70 text-[10px] uppercase tracking-wider block mb-1">Recommendations</span>
-                  <ExpandableTextarea title="Recommendations" value={form.recommendations} onChange={(value) => updateField('recommendations', value)} rows={4} onGenerate={(topic) => generateFieldWithAI('recommendations', 'Recommendations for Improvement', form.recommendations, 'Rewrite practical recommendations only from needs or facts explicitly present in this section or the user focus.', topic)} generating={aiGenerating === 'recommendations'} />
+                  <ExpandableTextarea title="Recommendations" value={form.recommendations} onChange={(value) => updateField('recommendations', value)} rows={4} onGenerate={(topic) => generateFieldWithAI('recommendations', 'Recommendations for Improvement', form.recommendations, 'Make recommendations only in response to a documented need in the supplied organization details or user focus. Do not present a proposed action as completed or invent a problem.', topic)} generating={aiGenerating === 'recommendations'} />
                 </label>
               </div>
             </SectionBlock>
@@ -3886,7 +3963,14 @@ export default function Home() {
                 <div className="space-y-4">
                   <label className="block text-xs sm:text-sm font-medium text-slate-200">
                     <span className="text-cyan-300/70 text-[10px] uppercase tracking-wider block mb-1">PRIME Report Narrative</span>
-                    <ExpandableTextarea title="PRIME Report Narrative" value={form.appendices.primeNarrative} onChange={(value) => updateAppendixText('primeNarrative', value)} rows={4} />
+                    <ExpandableTextarea
+                      title="PRIME Report Narrative"
+                      value={form.appendices.primeNarrative}
+                      onChange={(value) => updateAppendixText('primeNarrative', value)}
+                      rows={4}
+                      onGenerate={(topic) => generatePrimeNarrativeWithAI(form.appendices.primeNarrative, topic)}
+                      generating={aiGenerating === 'primeNarrative'}
+                    />
                   </label>
 
                   <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">

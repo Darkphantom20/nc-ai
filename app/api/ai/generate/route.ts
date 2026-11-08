@@ -97,11 +97,8 @@ function responseValidationError(
   if (!matchesRequestedLength(text, outputUnit, outputCount)) {
     return `${providerName} did not return exactly ${outputCount} ${outputUnit}.`;
   }
-  if (issueRequest && outputUnit === 'paragraphs' && !matchesRequestedLength(text, 'sentences', outputCount)) {
-    return `${providerName} added unsupported extra sentences to the issue description.`;
-  }
   if (issueRequest) {
-    const recommendationPattern = /\b(?:to address (?:this|the) challenge|recommended approach|recommendation|should (?:create|develop|implement|use|establish)|could (?:create|develop|implement|use|establish))\b/i;
+    const recommendationPattern = /\b(?:to address (?:this|the) challenge|recommend\w*|suggest\w*|proposed solution|solution would|should (?:create|develop|implement|use|establish)|could (?:create|develop|implement|use|establish))\b/i;
     if (recommendationPattern.test(text) && !recommendationPattern.test(factualEvidence)) {
       return `${providerName} added a recommendation that is not supported in the issue details.`;
     }
@@ -134,6 +131,7 @@ export async function POST(request: Request) {
     const focus = String(body.focus || '').trim().slice(0, 2000);
     const instructions = String(body.instructions || '').slice(0, 2000);
     const acknowledgementRequest = /acknowledg(?:e)?ment/i.test(title);
+    const primeNarrativeRequest = /prime report narrative/i.test(title);
     const issueRequest = /^(?:issue\s*\/\s*problem|problem)\s*[12]?$/i.test(title);
     const completedActionRequest = /\b(?:solution|action undertaken|strategy\s*\/\s*action)\b/i.test(title);
     const actionProblemNumber = title.match(/problem\s*([12])/i)?.[1];
@@ -171,6 +169,30 @@ export async function POST(request: Request) {
     }
     let promptSourceDetails = sourceDetails;
     let actionSourceDetails = '';
+    let issueSourceDetails = '';
+    if (issueRequest && isRecord(body.sourceDetails)) {
+      const source = body.sourceDetails;
+      const relatedSections = isRecord(source.relatedSections) ? source.relatedSections : {};
+      const relevantSectionLabels = new Set([
+        'Assigned Tasks and Responsibilities',
+        'Duties and Procedures Conformed',
+        ...(actionProblemNumber === '2' ? ['Issue / Problem 1'] : []),
+      ]);
+      const relevantSections = Object.fromEntries(
+        Object.entries(relatedSections).filter(([label, value]) => (
+          relevantSectionLabels.has(label) && hasSourceDetails(value)
+        )),
+      );
+      const relevantDetails = {
+        ...(schoolPlacementRequest ? { placementScope: 'schoolPlacement' } : {}),
+        ...(hasSourceDetails(source.weeklyJournal) ? { weeklyJournal: source.weeklyJournal } : {}),
+        ...(Object.keys(relevantSections).length ? { relatedSections: relevantSections } : {}),
+      };
+      if (hasSourceDetails(relevantDetails)) {
+        issueSourceDetails = JSON.stringify(relevantDetails);
+        promptSourceDetails = issueSourceDetails;
+      }
+    }
     if (completedActionRequest && isRecord(body.sourceDetails)) {
       const source = body.sourceDetails;
       const relatedSections = isRecord(source.relatedSections) ? source.relatedSections : {};
@@ -223,6 +245,12 @@ export async function POST(request: Request) {
           key !== 'placementScope' && hasSourceDetails(value)
         ))
       : hasSourceDetails(body.sourceDetails);
+    if (primeNarrativeRequest && !currentText.trim() && !focus) {
+      return NextResponse.json(
+        { error: 'Add the PRIME seminar topics, activities, or personal details in the generation focus before generating this narrative.' },
+        { status: 400 },
+      );
+    }
     if (!completedActionRequest && !currentText.trim() && !focus && !hasFactualSourceDetails) {
       return NextResponse.json(
         { error: 'Add report details or a generation focus before generating this section.' },
@@ -231,7 +259,7 @@ export async function POST(request: Request) {
     }
     const factualEvidence = completedActionRequest
       ? [focus, actionSourceDetails].filter(Boolean).join('\n')
-      : [currentText, focus, sourceDetails].filter(Boolean).join('\n');
+      : [currentText, focus, issueRequest ? promptSourceDetails : sourceDetails].filter(Boolean).join('\n');
 
     const prompt = [
       'You are a careful academic writing assistant for an On-the-Job Training (OJT) narrative report.',
@@ -254,8 +282,14 @@ export async function POST(request: Request) {
       acknowledgementRequest
         ? 'For acknowledgements, use related task details to align the wording with the user’s actual experience. Never invent who is being thanked or claim anyone provided support unless the source explicitly names them and their contribution. If no recipient and contribution are supplied, do not express thanks or claim guidance, support, opportunity, growth, or learning; use neutral statements grounded only in supplied work facts, and include a sentence asking the user to add the names and contributions they want acknowledged. Do not treat a role, workplace, branch, or organization as an acknowledgement recipient unless explicitly identified as one.'
         : '',
-      /vision|mission|objectives|core values/i.test(title)
-        ? 'For official vision, mission, objectives, and core-value statements, use only exact source details; if the source lacks them, briefly ask the user to provide the official wording.'
+      primeNarrativeRequest
+        ? 'For a PRIME seminar narrative, use only seminar topics, activities, speakers, dates, attendance, and reflections explicitly included in the current text or user focus. Uploaded files and photos are not read by this request and must not be treated as evidence. Do not claim attendance, learning, skills, or outcomes unless the user states them; ask for missing details.'
+        : '',
+      /background|vision|mission|objectives|core values|products and services|services/i.test(title)
+        ? 'For organization background and official vision, mission, objectives, core-value, product, or service statements, use only explicit source details. Do not guess from the organization name, location, field, or common practice. If no details are supplied, briefly ask the user for the official or factual information needed.'
+        : '',
+      /strengths|weaknesses|opportunities|threats|recommendations/i.test(title)
+        ? 'For organization analysis, use only facts explicitly provided about this organization. Do not fill SWOT categories with generic or industry-wide assumptions. For recommendations, respond only to a documented need. If the evidence is insufficient, state what information the user needs to add.'
         : '',
       issueRequest
         ? schoolPlacementRequest
