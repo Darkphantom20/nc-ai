@@ -24,7 +24,7 @@ const reportFieldLabels = {
 } as const;
 
 type FieldKey = keyof typeof reportFieldLabels;
-type Provider = 'groq' | 'gemini';
+type Provider = 'groq' | 'gemini' | 'deepseek';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -106,7 +106,8 @@ async function providerError(response: Response, provider: Provider): Promise<Er
   } catch {
     detail = body.slice(0, 300);
   }
-  return new Error(`${provider === 'groq' ? 'Groq' : 'Gemini'} returned HTTP ${response.status}${detail ? `: ${detail.slice(0, 300)}` : '.'}`);
+  const providerName = provider === 'groq' ? 'Groq' : provider === 'gemini' ? 'Gemini' : 'DeepSeek';
+  return new Error(`${providerName} returned HTTP ${response.status}${detail ? `: ${detail.slice(0, 300)}` : '.'}`);
 }
 
 async function requestGroq(prompt: string, apiKey: string): Promise<string> {
@@ -172,6 +173,38 @@ async function requestGemini(prompt: string, apiKey: string): Promise<string> {
   return content;
 }
 
+async function requestDeepSeek(prompt: string, apiKey: string): Promise<string> {
+  const response = await fetch('https://api.deepseek.com/chat/completions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: process.env.DEEPSEEK_MODEL || 'deepseek-flash',
+      temperature: 0.4,
+      response_format: { type: 'json_object' },
+      thinking: { type: 'disabled' },
+      messages: [
+        { role: 'system', content: 'Write factual, professional internship report drafts. Return only valid JSON.' },
+        { role: 'user', content: prompt },
+      ],
+    }),
+    signal: AbortSignal.timeout(55_000),
+  });
+
+  if (!response.ok) throw await providerError(response, 'deepseek');
+  const result: unknown = await response.json();
+  if (!isRecord(result) || !Array.isArray(result.choices)) {
+    throw new Error('DeepSeek returned an unexpected response.');
+  }
+  const firstChoice = result.choices[0];
+  if (!isRecord(firstChoice) || !isRecord(firstChoice.message) || typeof firstChoice.message.content !== 'string') {
+    throw new Error('DeepSeek returned no generated content.');
+  }
+  return firstChoice.message.content;
+}
+
 function parseJsonContent(content: string): unknown {
   const normalized = content.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
   return JSON.parse(normalized);
@@ -189,21 +222,27 @@ export async function POST(request: Request) {
   }
 
   const configuredProvider = (process.env.AI_PROVIDER || '').trim().toLowerCase();
-  if (configuredProvider && configuredProvider !== 'groq' && configuredProvider !== 'gemini') {
+  if (configuredProvider && !['groq', 'gemini', 'deepseek'].includes(configuredProvider)) {
     return Response.json({
-      error: 'AI_PROVIDER must be set to "groq" or "gemini".',
+      error: 'AI_PROVIDER must be set to "groq", "gemini", or "deepseek".',
     }, { status: 500 });
   }
 
-  const providerOrder: Provider[] = configuredProvider === 'gemini'
-    ? ['gemini', 'groq']
-    : ['groq', 'gemini'];
+  const providerOrder: Provider[] = configuredProvider === 'deepseek'
+    ? ['deepseek', 'groq', 'gemini']
+    : configuredProvider === 'gemini'
+      ? ['gemini', 'groq', 'deepseek']
+      : ['groq', 'gemini', 'deepseek'];
   const availableProviders = providerOrder.filter((provider) => Boolean(
-    provider === 'groq' ? process.env.GROQ_API_KEY : process.env.GEMINI_API_KEY
+    provider === 'groq'
+      ? process.env.GROQ_API_KEY
+      : provider === 'gemini'
+        ? process.env.GEMINI_API_KEY
+        : process.env.DEEPSEEK_API_KEY
   ));
   if (availableProviders.length === 0) {
     return Response.json({
-      error: 'Configure GROQ_API_KEY or GEMINI_API_KEY on the server to enable AI drafting.',
+      error: 'Configure GROQ_API_KEY, GEMINI_API_KEY, or DEEPSEEK_API_KEY on the server to enable AI drafting.',
     }, { status: 503 });
   }
 
@@ -252,11 +291,17 @@ export async function POST(request: Request) {
   let timedOut = false;
   for (const provider of availableProviders) {
     try {
-      const apiKey = provider === 'groq' ? process.env.GROQ_API_KEY : process.env.GEMINI_API_KEY;
+      const apiKey = provider === 'groq'
+        ? process.env.GROQ_API_KEY
+        : provider === 'gemini'
+          ? process.env.GEMINI_API_KEY
+          : process.env.DEEPSEEK_API_KEY;
       if (!apiKey) continue;
       const content = provider === 'groq'
         ? await requestGroq(prompt, apiKey)
-        : await requestGemini(prompt, apiKey);
+        : provider === 'gemini'
+          ? await requestGemini(prompt, apiKey)
+          : await requestDeepSeek(prompt, apiKey);
       const generated: unknown = parseJsonContent(content);
       if (!isRecord(generated)) throw new Error('The AI response was not a JSON object.');
 
