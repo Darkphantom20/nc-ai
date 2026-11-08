@@ -249,6 +249,61 @@ type AiDraftField = {
   selected: boolean;
 };
 
+function aiText(value: string, maxLength = 1000): string {
+  return value.trim().slice(0, maxLength);
+}
+
+function buildAIReportContext(form: NarrativeForm): Record<string, unknown> {
+  const reportFields = Object.fromEntries(
+    (Object.keys(aiNarrativeFieldLabels) as AiNarrativeFieldKey[]).map((key) => [
+      key,
+      aiText(form[key]),
+    ]),
+  );
+  const dailyJournal = form.appendices.dailyJournal.slice(0, 30).map((week) => ({
+    weekNumber: week.weekNumber,
+    totalHours: week.totalHours,
+    narrative: aiText(week.narrative, 500),
+    activities: week.activities
+      .filter((activity) => activity.accomplishment.trim())
+      .slice(0, 7)
+      .map((activity) => ({
+        day: aiText(activity.day, 40),
+        date: aiText(activity.date, 40),
+        accomplishment: aiText(activity.accomplishment, 300),
+        hours: activity.hours,
+      })),
+  }));
+  const placement = form.schoolPlacement.enabled
+    ? {
+        enabled: true,
+        trainingOrganization: aiText(form.schoolPlacement.trainingOrganization, 200),
+        trainingLocation: aiText(form.schoolPlacement.trainingLocation, 200),
+        details: Object.fromEntries(
+          (Object.keys(aiNarrativeFieldLabels) as AiNarrativeFieldKey[]).map((key) => [
+            key,
+            aiText(form.schoolPlacement[key]),
+          ]),
+        ),
+      }
+    : { enabled: false };
+
+  return {
+    trainingOrganization: aiText(form.trainingOrganization, 200),
+    trainingLocation: aiText(form.trainingLocation, 200),
+    collegeFaculty: aiText(form.collegeFaculty, 200),
+    degreeProgram: aiText(form.degreeProgram, 200),
+    studentName: aiText(form.studentName, 200),
+    submittedToName: aiText(form.submittedToName, 200),
+    submittedToTitle: aiText(form.submittedToTitle, 200),
+    trainingDuration: aiText(form.trainingDuration, 200),
+    studentYear: aiText(form.studentYear, 100),
+    ...reportFields,
+    schoolPlacement: placement,
+    dailyJournal,
+  };
+}
+
 type ParsedJournalImport = {
   fileName: string;
   weeks: NarrativeJournalWeek[];
@@ -1671,19 +1726,21 @@ export default function Home() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           title,
-          context: form,
-          currentText,
+          context: buildAIReportContext(form),
+          currentText: aiText(currentText, 12000),
           instructions: [
             instructions,
-            topic ? `User generation focus: ${topic}. Make this focus central while preserving all compatible facts from the complete report data.` : '',
+            topic ? `User generation focus: ${aiText(topic, 2000)}. Make this focus central while preserving all compatible facts from the complete report data.` : '',
           ].filter(Boolean).join('\n'),
         }),
       });
       const result: unknown = await response.json().catch(() => null);
       if (!response.ok) {
-        const message = isRecord(result) && typeof result.error === 'string'
-          ? result.error
-          : 'Could not generate text. Please try again.';
+        const message = response.status === 413
+          ? 'The report details are too large to send for AI drafting. Shorten long text fields and try again.'
+          : isRecord(result) && typeof result.error === 'string'
+            ? result.error
+            : 'Could not generate text. Please try again.';
         throw new Error(message);
       }
       if (!isRecord(result) || typeof result.text !== 'string' || !result.text.trim()) {
@@ -1711,19 +1768,37 @@ export default function Home() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           title: `Week ${week.weekNumber} Daily Journal Narrative`,
-          context: { report: form, week },
-          currentText: week.narrative,
+          context: {
+            report: buildAIReportContext(form),
+            week: {
+              weekNumber: week.weekNumber,
+              totalHours: week.totalHours,
+              narrative: aiText(week.narrative, 1000),
+              activities: week.activities
+                .filter((activity) => activity.accomplishment.trim())
+                .slice(0, 7)
+                .map((activity) => ({
+                  day: aiText(activity.day, 40),
+                  date: aiText(activity.date, 40),
+                  accomplishment: aiText(activity.accomplishment, 500),
+                  hours: activity.hours,
+                })),
+            },
+          },
+          currentText: aiText(week.narrative, 12000),
           instructions: [
             'Summarize the listed daily activities and total hours into a coherent weekly OJT narrative. Do not invent activities, dates, hours, or skills.',
-            topic ? `User generation focus: ${topic}. Make this focus central while keeping the narrative consistent with the complete report data.` : '',
+            topic ? `User generation focus: ${aiText(topic, 2000)}. Make this focus central while keeping the narrative consistent with the complete report data.` : '',
           ].filter(Boolean).join('\n'),
         }),
       });
       const result: unknown = await response.json().catch(() => null);
       if (!response.ok) {
-        const message = isRecord(result) && typeof result.error === 'string'
-          ? result.error
-          : 'Could not generate the weekly narrative. Please try again.';
+        const message = response.status === 413
+          ? 'The report details are too large to send for AI drafting. Shorten long text fields and try again.'
+          : isRecord(result) && typeof result.error === 'string'
+            ? result.error
+            : 'Could not generate the weekly narrative. Please try again.';
         throw new Error(message);
       }
       if (!isRecord(result) || typeof result.text !== 'string' || !result.text.trim()) {
