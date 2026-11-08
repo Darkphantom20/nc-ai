@@ -20,6 +20,8 @@ Use **Draft with AI** to create editable text for the narrative report fields. D
 
 Use **Generate with AI** in an individual section editor to create or revise that section. Add an optional focus, choose whether the result should contain 1–10 sentences or paragraphs, generate once, review the result in the editor, and choose **Save** to apply it. Generation uses the weekly journal activities and generated weekly narratives as its primary source for student-experience content, with related user-edited report fields as supporting context. For case analysis, it uses documented issues when available or clearly labels a task-grounded inference as a potential challenge rather than a confirmed event. Unchanged sample text, attachments, and unrelated default data are excluded. Full-report drafting uses the same journal context. Official organization statements still require explicit source details; journal entries alone are not treated as proof of an organization's mission, vision, or services. The AI is instructed to follow the user's actual field and duties rather than assuming an IT placement, and to ask for details instead of guessing. Always review AI-generated text for accuracy before including it in a final report.
 
+When **I continued my OJT in another place** is enabled, the second-placement fields from Introduction through Reflections also provide **Generate with AI**. Their context is isolated to details entered in the second placement and does not reuse the first placement's journal or report fields. The report retains one shared Acknowledgement section.
+
 Add one or more provider keys to `.env.local` (do not commit this file):
 
 ```env

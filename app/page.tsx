@@ -321,6 +321,41 @@ function buildAISectionContext(form: NarrativeForm, targetKey: AiGenerationField
   };
 }
 
+function buildSchoolPlacementAIContext(
+  placement: typeof defaultForm.schoolPlacement,
+  targetKey: AiNarrativeFieldKey,
+): Record<string, unknown> {
+  const relatedSections = Object.fromEntries(
+    (Object.keys(aiNarrativeFieldLabels) as AiNarrativeFieldKey[])
+      .filter((key) => key !== targetKey)
+      .flatMap((key) => {
+        const value = userProvidedText(
+          placement[key],
+          defaultForm.schoolPlacement[key],
+          3000,
+        );
+        return value ? [[aiNarrativeFieldLabels[key], value]] : [];
+      }),
+  );
+  const organization = userProvidedText(
+    placement.trainingOrganization,
+    defaultForm.schoolPlacement.trainingOrganization,
+    200,
+  );
+  const location = userProvidedText(
+    placement.trainingLocation,
+    defaultForm.schoolPlacement.trainingLocation,
+    200,
+  );
+
+  return {
+    placementScope: 'schoolPlacement',
+    ...(organization ? { trainingOrganization: organization } : {}),
+    ...(location ? { trainingLocation: location } : {}),
+    relatedSections,
+  };
+}
+
 type ParsedJournalImport = {
   fileName: string;
   weeks: NarrativeJournalWeek[];
@@ -1727,24 +1762,27 @@ export default function Home() {
     setForm((prev) => ({ ...prev, [key]: value }));
   };
 
-  const generateFieldWithAI = async (
-    key: AiGenerationFieldKey,
+  const requestAIField = async (
+    generationKey: string,
     title: string,
+    apiTitle: string,
     currentText: string,
     instructions = '',
     options: AIGenerationOptions,
+    sourceDetails: Record<string, unknown>,
+    exampleText: string,
   ): Promise<string | null> => {
     if (aiGenerating) return null;
-    setAiGenerating(String(key));
+    setAiGenerating(generationKey);
     setStatus(`Generating ${title} with AI...`);
     try {
       const response = await fetch('/api/ai/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          title,
-          sourceDetails: buildAISectionContext(form, key),
-          currentText: userProvidedText(currentText, defaultForm[key], 12000),
+          title: apiTitle,
+          sourceDetails,
+          currentText: userProvidedText(currentText, exampleText, 12000),
           focus: aiText(options.focus, 2000),
           instructions,
           outputUnit: options.unit,
@@ -1773,6 +1811,40 @@ export default function Home() {
       setAiGenerating('');
     }
   };
+
+  const generateFieldWithAI = (
+    key: AiGenerationFieldKey,
+    title: string,
+    currentText: string,
+    instructions = '',
+    options: AIGenerationOptions,
+  ): Promise<string | null> => requestAIField(
+    String(key),
+    title,
+    title,
+    currentText,
+    instructions,
+    options,
+    buildAISectionContext(form, key),
+    defaultForm[key],
+  );
+
+  const generateSchoolPlacementFieldWithAI = (
+    key: AiNarrativeFieldKey,
+    title: string,
+    currentText: string,
+    instructions = '',
+    options: AIGenerationOptions,
+  ): Promise<string | null> => requestAIField(
+    `schoolPlacement.${key}`,
+    title,
+    aiNarrativeFieldLabels[key],
+    currentText,
+    instructions,
+    options,
+    buildSchoolPlacementAIContext(form.schoolPlacement, key),
+    defaultForm.schoolPlacement[key],
+  );
 
   const generateWeeklyNarrative = async (weekIndex: number, options: AIGenerationOptions): Promise<string | null> => {
     const week = form.appendices.dailyJournal[weekIndex];
@@ -3402,6 +3474,9 @@ export default function Home() {
 
                 {form.schoolPlacement.enabled && (
                   <div className="space-y-5 rounded-2xl border border-slate-800 bg-slate-950/60 p-4 sm:p-5">
+                    <p className="text-xs text-slate-400">
+                      Generate with AI from the second-placement fields below. It uses only details entered for this placement; the Acknowledgement above remains shared by the report.
+                    </p>
                     <div className="grid gap-3 sm:grid-cols-2">
                       <label className="block text-xs sm:text-sm font-medium text-slate-200">
                         <span className="text-cyan-300/70 text-[10px] uppercase tracking-wider block mb-1">School/OJT Unit</span>
@@ -3416,6 +3491,8 @@ export default function Home() {
                       placement={form.schoolPlacement}
                       reportTemplate={form.reportTemplate}
                       updateField={updateSchoolPlacementField}
+                      generateField={generateSchoolPlacementFieldWithAI}
+                      generatingField={aiGenerating}
                       onOrganizationImageUpload={handleSchoolOrganizationStructureUpload}
                       onRemoveOrganizationImage={() => updateSchoolPlacementField('organizationStructureImage', '')}
                     />
@@ -4191,41 +4268,96 @@ function PlacementNarrativeFields({
   placement,
   reportTemplate,
   updateField,
+  generateField,
+  generatingField,
   onOrganizationImageUpload,
   onRemoveOrganizationImage,
 }: {
   placement: typeof defaultForm.schoolPlacement;
   reportTemplate: typeof defaultForm.reportTemplate;
   updateField: (key: keyof typeof defaultForm.schoolPlacement, value: string) => void;
+  generateField: (
+    key: AiNarrativeFieldKey,
+    title: string,
+    currentText: string,
+    instructions: string,
+    options: AIGenerationOptions,
+  ) => Promise<string | null>;
+  generatingField: string;
   onOrganizationImageUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onRemoveOrganizationImage: () => void;
 }) {
+  const schoolFieldAI = (
+    key: AiNarrativeFieldKey,
+    title: string,
+    instructions: string,
+  ) => ({
+    onGenerate: (options: AIGenerationOptions) => generateField(
+      key,
+      title,
+      placement[key],
+      instructions,
+      options,
+    ),
+    generating: generatingField === `schoolPlacement.${key}`,
+  });
+
   return (
     <div className="space-y-5">
       <SectionBlock title="1. Introduction">
         <div className="space-y-4 sm:space-y-5">
           <label className="block text-xs sm:text-sm font-medium text-slate-200">
             <span className="text-cyan-300/70 text-[10px] uppercase tracking-wider block mb-1">Background</span>
-            <ExpandableTextarea title="School OJT Background" value={placement.background} onChange={(value) => updateField('background', value)} rows={4} />
+            <ExpandableTextarea
+              title="School OJT Background"
+              value={placement.background}
+              onChange={(value) => updateField('background', value)}
+              rows={4}
+              {...schoolFieldAI('background', 'School OJT Background', 'Use only explicit school-placement details. Do not invent institutional history, dates, roles, or services; ask for source information if it is missing.')}
+            />
           </label>
           <div className="grid gap-3 sm:gap-5 md:grid-cols-2">
             <label className="block text-xs sm:text-sm font-medium text-slate-200">
               <span className="text-cyan-300/70 text-[10px] uppercase tracking-wider block mb-1">Vision</span>
-              <ExpandableTextarea title="School OJT Vision" value={placement.vision} onChange={(value) => updateField('vision', value)} rows={3} />
+              <ExpandableTextarea
+                title="School OJT Vision"
+                value={placement.vision}
+                onChange={(value) => updateField('vision', value)}
+                rows={3}
+                {...schoolFieldAI('vision', 'School OJT Vision', 'Use only the official vision statement explicitly supplied for this second placement. If it is not supplied, ask the user to provide it; do not infer or invent official wording.')}
+              />
             </label>
             <label className="block text-xs sm:text-sm font-medium text-slate-200">
               <span className="text-cyan-300/70 text-[10px] uppercase tracking-wider block mb-1">Mission</span>
-              <ExpandableTextarea title="School OJT Mission" value={placement.mission} onChange={(value) => updateField('mission', value)} rows={3} />
+              <ExpandableTextarea
+                title="School OJT Mission"
+                value={placement.mission}
+                onChange={(value) => updateField('mission', value)}
+                rows={3}
+                {...schoolFieldAI('mission', 'School OJT Mission', 'Use only the official mission statement explicitly supplied for this second placement. If it is not supplied, ask the user to provide it; do not infer or invent official wording.')}
+              />
             </label>
           </div>
           <div className="grid gap-3 sm:gap-5 md:grid-cols-3">
             <label className="block text-xs sm:text-sm font-medium text-slate-200">
               <span className="text-emerald-300/70 text-[10px] uppercase tracking-wider block mb-1">Objectives</span>
-              <ExpandableTextarea title="School OJT Objectives" value={placement.objectives} onChange={(value) => updateField('objectives', value)} rows={3} />
+              <ExpandableTextarea
+                title="School OJT Objectives"
+                value={placement.objectives}
+                onChange={(value) => updateField('objectives', value)}
+                rows={3}
+                {...schoolFieldAI('objectives', 'School OJT Objectives', 'Use only explicit objectives supplied for this second placement. Do not create official goals or claims; request the source wording if it is missing.')}
+              />
             </label>
             <label className="block text-xs sm:text-sm font-medium text-slate-200">
               <span className="text-violet-300/70 text-[10px] uppercase tracking-wider block mb-1">Core Values</span>
-              <ExpandableTextarea title="School OJT Core Values" value={placement.coreValues} onChange={(value) => updateField('coreValues', value)} rows={3} />
+              <ExpandableTextarea
+                title="School OJT Core Values"
+                value={placement.coreValues}
+                onChange={(value) => updateField('coreValues', value)}
+                rows={3}
+                {...schoolFieldAI('coreValues', 'School OJT Core Values', 'Use only explicit core values supplied for this second placement. Do not invent official values; request the source wording if it is missing.')}
+              />
             </label>
             <label className="block text-xs sm:text-sm font-medium text-slate-200">
               <span className="text-orange-300/70 text-[10px] uppercase tracking-wider block mb-1">
@@ -4236,6 +4368,7 @@ function PlacementNarrativeFields({
                 value={placement.services}
                 onChange={(value) => updateField('services', value)}
                 rows={3}
+                {...schoolFieldAI('services', 'School OJT Services', 'Describe only services explicitly supplied for this second placement. Do not assume the organization provides particular services; ask for source details if they are missing.')}
               />
             </label>
           </div>
@@ -4269,13 +4402,25 @@ function PlacementNarrativeFields({
             {(['strengths', 'weaknesses', 'opportunities', 'threats'] as const).map((key) => (
               <label key={key} className="block text-xs sm:text-sm font-medium text-slate-200">
                 <span className="text-cyan-300/70 text-[10px] uppercase tracking-wider block mb-1">{key}</span>
-                <ExpandableTextarea title={`School OJT ${key}`} value={placement[key]} onChange={(value) => updateField(key, value)} rows={4} />
+                <ExpandableTextarea
+                  title={`School OJT ${key}`}
+                  value={placement[key]}
+                  onChange={(value) => updateField(key, value)}
+                  rows={4}
+                  {...schoolFieldAI(key, `School OJT ${key}`, 'Use only details supplied for this second placement. Keep the analysis specific to the entered facts and do not invent conditions, outcomes, or organizational claims.')}
+                />
               </label>
             ))}
           </div>
           <label className="block text-xs sm:text-sm font-medium text-slate-200">
             <span className="text-blue-300/70 text-[10px] uppercase tracking-wider block mb-1">Recommendations</span>
-            <ExpandableTextarea title="School OJT Recommendations" value={placement.recommendations} onChange={(value) => updateField('recommendations', value)} rows={4} />
+            <ExpandableTextarea
+              title="School OJT Recommendations"
+              value={placement.recommendations}
+              onChange={(value) => updateField('recommendations', value)}
+              rows={4}
+              {...schoolFieldAI('recommendations', 'School OJT Recommendations', 'Base recommendations only on documented details for this second placement. Clearly keep recommendations as proposed actions, not actions already completed.')}
+            />
           </label>
         </div>
       </SectionBlock>
@@ -4284,11 +4429,23 @@ function PlacementNarrativeFields({
         <div className="space-y-4 sm:space-y-5">
           <label className="block text-xs sm:text-sm font-medium text-slate-200">
             <span className="text-emerald-300/70 text-[10px] uppercase tracking-wider block mb-1">Assigned Tasks</span>
-            <ExpandableTextarea title="School OJT Assigned Tasks" value={placement.tasks} onChange={(value) => updateField('tasks', value)} rows={4} />
+            <ExpandableTextarea
+              title="School OJT Assigned Tasks"
+              value={placement.tasks}
+              onChange={(value) => updateField('tasks', value)}
+              rows={4}
+              {...schoolFieldAI('tasks', 'School OJT Assigned Tasks', 'Describe only duties and tasks explicitly supplied for the second placement. Do not import work from the first placement or invent tools, procedures, or results.')}
+            />
           </label>
           <label className="block text-xs sm:text-sm font-medium text-slate-200">
             <span className="text-blue-300/70 text-[10px] uppercase tracking-wider block mb-1">Procedures Conformed</span>
-            <ExpandableTextarea title="School OJT Procedures Conformed" value={placement.procedures} onChange={(value) => updateField('procedures', value)} rows={4} />
+            <ExpandableTextarea
+              title="School OJT Procedures Conformed"
+              value={placement.procedures}
+              onChange={(value) => updateField('procedures', value)}
+              rows={4}
+              {...schoolFieldAI('procedures', 'School OJT Procedures Conformed', 'Describe only procedures explicitly supplied for the second placement. Do not invent policies, standards, or steps.')}
+            />
           </label>
         </div>
       </SectionBlock>
@@ -4299,13 +4456,27 @@ function PlacementNarrativeFields({
             {([['issue1', 'Problem 1'], ['issue1Action', 'Solution 1'], ['issue2', 'Problem 2'], ['issue2Action', 'Solution 2']] as const).map(([key, label]) => (
               <label key={key} className="block text-xs sm:text-sm font-medium text-slate-200">
                 <span className="text-cyan-300/70 text-[10px] uppercase tracking-wider block mb-1">{label}</span>
-                <ExpandableTextarea title={`School OJT ${label}`} value={placement[key]} onChange={(value) => updateField(key, value)} rows={4} />
+                <ExpandableTextarea
+                  title={`School OJT ${label}`}
+                  value={placement[key]}
+                  onChange={(value) => updateField(key, value)}
+                  rows={4}
+                  {...schoolFieldAI(key, `School OJT ${label}`, key.endsWith('Action')
+                    ? 'Report only actions actually taken in the second placement and explicitly supported by its task details or the user focus. If no steps are documented, ask the user to provide them; never invent a solution or successful result.'
+                    : 'Use a documented issue if supplied. Otherwise describe one clearly labeled potential challenge grounded in a concrete second-placement task. Do not add a solution, recommendation, outcome, or unsupported personal experience.')}
+                />
               </label>
             ))}
           </div>
           <label className="block text-xs sm:text-sm font-medium text-slate-200">
             <span className="text-yellow-300/70 text-[10px] uppercase tracking-wider block mb-1">Lessons Learned</span>
-            <ExpandableTextarea title="School OJT Lessons Learned" value={placement.lessons} onChange={(value) => updateField('lessons', value)} rows={4} />
+            <ExpandableTextarea
+              title="School OJT Lessons Learned"
+              value={placement.lessons}
+              onChange={(value) => updateField('lessons', value)}
+              rows={4}
+              {...schoolFieldAI('lessons', 'School OJT Lessons Learned', 'Derive lessons only from the documented second-placement tasks and situations. Do not invent skills, incidents, or outcomes.')}
+            />
           </label>
         </div>
       </SectionBlock>
@@ -4314,7 +4485,13 @@ function PlacementNarrativeFields({
         <div className="space-y-4 sm:space-y-5">
           <label className="block text-xs sm:text-sm font-medium text-slate-200">
             <span className="text-violet-300/70 text-[10px] uppercase tracking-wider block mb-1">Self-Evaluation</span>
-            <ExpandableTextarea title="School OJT Self-Evaluation" value={placement.selfEvaluation} onChange={(value) => updateField('selfEvaluation', value)} rows={4} />
+            <ExpandableTextarea
+              title="School OJT Self-Evaluation"
+              value={placement.selfEvaluation}
+              onChange={(value) => updateField('selfEvaluation', value)}
+              rows={4}
+              {...schoolFieldAI('selfEvaluation', 'School OJT Self-Evaluation', 'Write in first person only from documented second-placement tasks, reflections, and outcomes. Do not claim a skill, achievement, or experience without supporting details.')}
+            />
           </label>
           <label className="block text-xs sm:text-sm font-medium text-slate-200">
             <span className="text-violet-300/70 text-[10px] uppercase tracking-wider block mb-1">
@@ -4325,6 +4502,7 @@ function PlacementNarrativeFields({
               value={placement.relevancy}
               onChange={(value) => updateField('relevancy', value)}
               rows={4}
+              {...schoolFieldAI('relevancy', 'School OJT Relevancy of the Organization', 'Rewrite only the user-provided explanation of relevance for this second placement. Do not infer the student’s course, career goals, or learning outcomes.')}
             />
           </label>
         </div>
