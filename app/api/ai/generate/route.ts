@@ -3,7 +3,7 @@ import { hasUnsupportedAcknowledgementClaims, matchesRequestedLength } from '../
 
 export const runtime = 'nodejs';
 
-const providerTimeoutMs = 20_000;
+const providerTimeoutMs = 45_000;
 type Provider = 'groq' | 'gemini' | 'deepseek';
 
 const exhaustedUntil = new Map<string, number>();
@@ -23,7 +23,7 @@ function getKeys(primary: string | undefined, list: string | undefined): string[
 function isRateLimit(errorText: string, status: number): boolean {
   return status === 429
     || (status === 503 && /high demand|overload|temporarily unavailable/i.test(errorText))
-    || /rate.?limit|quota|resource.?exhausted|too many requests|limit exceeded/i.test(errorText);
+    || /rate.?limit|requests per minute|tokens per minute|\b(?:rpm|tpm)\b|too many requests/i.test(errorText);
 }
 
 function retryDelayMs(errorText: string, status: number, retryAfter: string | null): number {
@@ -83,6 +83,24 @@ function providerRetryDelayMs(keys: string[], provider: string): number {
   return nextAvailable ? nextAvailable - now : 0;
 }
 
+function responseValidationError(
+  providerName: string,
+  text: string,
+  outputUnit: 'sentences' | 'paragraphs',
+  outputCount: number,
+  acknowledgementRequest: boolean,
+  factualEvidence: string,
+): string {
+  if (!text) return `${providerName} returned no text.`;
+  if (!matchesRequestedLength(text, outputUnit, outputCount)) {
+    return `${providerName} did not return exactly ${outputCount} ${outputUnit}.`;
+  }
+  if (acknowledgementRequest && hasUnsupportedAcknowledgementClaims(text, factualEvidence)) {
+    return `${providerName} included acknowledgement claims not supported by the supplied details.`;
+  }
+  return '';
+}
+
 export async function POST(request: Request) {
   const groqKeys = getKeys(process.env.GROQ_API_KEY, process.env.GROQ_API_KEYS);
   const geminiKeys = getKeys(process.env.GEMINI_API_KEY, process.env.GEMINI_API_KEYS);
@@ -99,6 +117,8 @@ export async function POST(request: Request) {
     const instructions = String(body.instructions || '').slice(0, 2000);
     const acknowledgementRequest = /acknowledg(?:e)?ment/i.test(title);
     const issueRequest = /^(?:issue\s*\/\s*problem|problem)\s*[12]?$/i.test(title);
+    const completedActionRequest = /\b(?:solution|action undertaken|strategy\s*\/\s*action)\b/i.test(title);
+    const actionProblemNumber = title.match(/problem\s*([12])/i)?.[1];
     const outputUnit = body.outputUnit === undefined || body.outputUnit === 'paragraphs'
       ? 'paragraphs'
       : body.outputUnit === 'sentences'
@@ -129,21 +149,57 @@ export async function POST(request: Request) {
         { status: 413 },
       );
     }
-    if (!currentText.trim() && !focus && !hasSourceDetails(body.sourceDetails)) {
+    let promptSourceDetails = sourceDetails;
+    let actionSourceDetails = '';
+    if (completedActionRequest && isRecord(body.sourceDetails)) {
+      const source = body.sourceDetails;
+      const relatedSections = isRecord(source.relatedSections) ? source.relatedSections : {};
+      const relevantSectionLabels = new Set([
+        actionProblemNumber ? `Issue / Problem ${actionProblemNumber}` : '',
+      ]);
+      const relevantSections = Object.fromEntries(
+        Object.entries(relatedSections).filter(([label, value]) => (
+          relevantSectionLabels.has(label) && hasSourceDetails(value)
+        )),
+      );
+      const relevantDetails = {
+        ...(hasSourceDetails(source.weeklyJournal) ? { weeklyJournal: source.weeklyJournal } : {}),
+        ...(Object.keys(relevantSections).length ? { relatedSections: relevantSections } : {}),
+      };
+      if (hasSourceDetails(relevantDetails)) {
+        actionSourceDetails = JSON.stringify(relevantDetails);
+      }
+      promptSourceDetails = actionSourceDetails;
+    }
+    const journalActionEvidence = isRecord(body.sourceDetails)
+      && hasSourceDetails(body.sourceDetails.weeklyJournal);
+    const hasActionEvidence = Boolean(focus) || Boolean(journalActionEvidence);
+    if (completedActionRequest && !hasActionEvidence) {
+      return NextResponse.json(
+        { error: 'Add the steps you actually took to the weekly journal or generation focus before generating a solution.' },
+        { status: 400 },
+      );
+    }
+    if (!completedActionRequest && !currentText.trim() && !focus && !hasSourceDetails(body.sourceDetails)) {
       return NextResponse.json(
         { error: 'Add report details or a generation focus before generating this section.' },
         { status: 400 },
       );
     }
-    const factualEvidence = [currentText, focus, sourceDetails].filter(Boolean).join('\n');
+    const factualEvidence = completedActionRequest
+      ? [focus, actionSourceDetails].filter(Boolean).join('\n')
+      : [currentText, focus, sourceDetails].filter(Boolean).join('\n');
 
     const prompt = [
       'You are a careful academic writing assistant for an On-the-Job Training (OJT) narrative report.',
       `Section: ${title}`,
-      'Use only the current section text, the optional user focus, and source details supplied below as factual evidence. The weeklyJournal entries and weekly narratives are the primary source for the student’s actual work; base relevant tasks, duties, procedures, problems, actions, results, lessons, and reflections on them. Other user-provided sections are supporting context: use them only when directly relevant and never let generic sample text override the journal.',
+      completedActionRequest
+        ? 'For this completed-action field, the current section text is only a draft to revise and is not factual evidence; it may contain earlier unsupported AI claims. The matching problem is context, not proof of a solution. Use the user focus and weekly journal as evidence, and report completed actions only when those sources document them for this problem. If they do not document the steps actually taken, ask the user to provide them instead of generating an action.'
+        : 'Use only the current section text, the optional user focus, and source details supplied below as factual evidence. The weeklyJournal entries and weekly narratives are the primary source for the student’s actual work; base relevant tasks, duties, procedures, problems, actions, results, lessons, and reflections on them. Other user-provided sections are supporting context: use them only when directly relevant and never let generic sample text override the journal.',
       'Weekly journal activities do not establish official organization facts. For organization background, vision, mission, objectives, core values, or services, rely only on explicit organization details and ask for official wording when it is missing.',
       'The title and additional writing instructions describe the task; they are not evidence of facts.',
       'Follow the user’s actual field and duties. Do not assume the placement is IT-related: never introduce IT, technology, healthcare, banking, business, education, or other industry-specific terms unless those details appear in the supplied factual evidence.',
+      'Before drafting, check that every factual clause is directly supported by the current text, focus, or source details. Do not embellish a task into unstated tools, technologies, procedures, causes, impacts, achievements, or successful outcomes. Keep specific terms such as SQL, database drivers, and connection strings only when the user supplied them.',
       'Do not invent names, people thanked, roles, dates, duties, procedures, policies, unqualified problem claims, causes, actions, results, achievements, skills, statistics, official statements, or personal experiences.',
       acknowledgementRequest
         ? 'For acknowledgements, use related task details to align the wording with the user’s actual experience. Never invent who is being thanked or claim anyone provided support unless the source explicitly names them and their contribution. If no recipient and contribution are supplied, do not express thanks or claim guidance, support, opportunity, growth, or learning; use neutral statements grounded only in supplied work facts, and include a sentence asking the user to add the names and contributions they want acknowledged. Do not treat a role, workplace, branch, or organization as an acknowledgement recipient unless explicitly identified as one.'
@@ -154,6 +210,9 @@ export async function POST(request: Request) {
       issueRequest
         ? 'For this issue field, use an explicitly documented issue if one is in the journal. Otherwise, describe one potential challenge directly related to a concrete journal task, and clearly label it as potential rather than a confirmed event. Keep it to the task and objects named in the journal: add no unstated reasons, setting, systems, standards, policies, protocols, requirements, failures, effects, or consequences. For example, a journal entry saying “helped arrange documents and papers” supports “A potential challenge was organizing the documents and papers clearly,” but does not support claims about misfiling, compliance, or retrieval. If no concrete task is documented, ask for more information.'
         : '',
+      completedActionRequest
+        ? `For a solution or action-undertaken field${actionProblemNumber ? ` for Problem ${actionProblemNumber}` : ''}, report only steps and outcomes explicitly recorded as actions for that problem. Do not borrow unrelated journal tasks, infer a fix, convert a recommendation into a completed action, or claim success unless stated. If no matching action is documented, ask the user to provide the steps taken.`
+        : '',
       'For solution/action sections, describe actions as completed only when the user documented them. If only a potential challenge is supported, a suggested response may be offered only when clearly labeled as a recommendation, not an action already taken.',
       'Rewrite the supplied details clearly without changing their meaning or adding generic filler.',
       'Use first-person language when the section naturally describes the student experience. Otherwise use a formal academic or organizational voice.',
@@ -163,7 +222,7 @@ export async function POST(request: Request) {
       instructions ? `Additional instructions: ${instructions}` : '',
       focus ? `Optional user-provided focus and factual details: ${focus}` : '',
       currentText ? `Current text to improve: ${currentText}` : '',
-      sourceDetails ? `Source details for this section only: ${sourceDetails}` : '',
+      promptSourceDetails ? `Source details for this section only: ${promptSourceDetails}` : '',
     ].filter(Boolean).join('\n\n');
 
     if (!groqKeys.length && !geminiKeys.length && !deepseekKeys.length) {
@@ -248,13 +307,19 @@ export async function POST(request: Request) {
                   candidateText = choice.message.content.trim();
                 }
               }
-              if (candidateText
-                && matchesRequestedLength(candidateText, outputUnit, outputCount)
-                && !(acknowledgementRequest && hasUnsupportedAcknowledgementClaims(candidateText, factualEvidence))) {
+              const validationError = responseValidationError(
+                'Groq',
+                candidateText,
+                outputUnit,
+                outputCount,
+                acknowledgementRequest,
+                factualEvidence,
+              );
+              if (!validationError) {
                 text = candidateText;
                 provider = 'groq';
               } else {
-                providerErrors.push('Groq returned text that did not meet the requested length or acknowledgement fact checks.');
+                providerErrors.push(validationError);
               }
             } else {
               const message = isRecord(result) && isRecord(result.error) && typeof result.error.message === 'string'
@@ -307,13 +372,19 @@ export async function POST(request: Request) {
                     .trim();
                 }
               }
-              if (candidateText
-                && matchesRequestedLength(candidateText, outputUnit, outputCount)
-                && !(acknowledgementRequest && hasUnsupportedAcknowledgementClaims(candidateText, factualEvidence))) {
+              const validationError = responseValidationError(
+                'Gemini',
+                candidateText,
+                outputUnit,
+                outputCount,
+                acknowledgementRequest,
+                factualEvidence,
+              );
+              if (!validationError) {
                 text = candidateText;
                 provider = 'gemini';
               } else {
-                providerErrors.push('Gemini returned text that did not meet the requested length or acknowledgement fact checks.');
+                providerErrors.push(validationError);
               }
             } else {
               const message = isRecord(result) && isRecord(result.error) && typeof result.error.message === 'string'
@@ -359,13 +430,19 @@ export async function POST(request: Request) {
                   candidateText = choice.message.content.trim();
                 }
               }
-              if (candidateText
-                && matchesRequestedLength(candidateText, outputUnit, outputCount)
-                && !(acknowledgementRequest && hasUnsupportedAcknowledgementClaims(candidateText, factualEvidence))) {
+              const validationError = responseValidationError(
+                'DeepSeek',
+                candidateText,
+                outputUnit,
+                outputCount,
+                acknowledgementRequest,
+                factualEvidence,
+              );
+              if (!validationError) {
                 text = candidateText;
                 provider = 'deepseek';
               } else {
-                providerErrors.push('DeepSeek returned text that did not meet the requested length or acknowledgement fact checks.');
+                providerErrors.push(validationError);
               }
             } else {
               const message = isRecord(result) && isRecord(result.error) && typeof result.error.message === 'string'
@@ -392,9 +469,16 @@ export async function POST(request: Request) {
     }
 
     if (!text) {
+      const failureDetails = providerErrors.join(' | ');
       if (providerRetryDelay > 0) {
         return NextResponse.json(
-          { error: 'AI providers are temporarily busy or rate-limited. Please wait about a minute and try again.' },
+          {
+            error: [
+              'One or more AI providers are rate-limited. Other providers may have timed out or returned unusable text.',
+              failureDetails,
+              'Please retry after the cooldown.',
+            ].filter(Boolean).join(' '),
+          },
           {
             status: 503,
             headers: { 'Retry-After': String(Math.ceil(providerRetryDelay / 1000)) },
@@ -402,7 +486,7 @@ export async function POST(request: Request) {
         );
       }
       return NextResponse.json(
-        { error: providerErrors.join(' | ') || 'The AI provider returned no text.' },
+        { error: failureDetails || 'The AI providers returned no usable text.' },
         { status: 502 },
       );
     }

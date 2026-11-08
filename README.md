@@ -77,7 +77,7 @@ $env:DEEPSEEK_API_KEYS="deepseek_key_1,deepseek_key_2"
 npm run dev
 ```
 
-The section-generation API rotates provider priority when `AI_PROVIDER` is unset, tries each available key once, and puts a key temporarily on cooldown when a provider reports a rate limit or quota error. After the cooldown, that key becomes available again automatically. Full-report drafting supports `DEEPSEEK_API_KEY` and provider selection, but not the plural `DEEPSEEK_API_KEYS` setting.
+The section-generation API rotates provider priority when `AI_PROVIDER` is unset, tries each available key once, and puts a key temporarily on cooldown when a provider reports a rate limit. Provider timeouts, account balance/credential errors, and output-validation failures are reported separately; a rate limit in one provider does not mean every provider is busy. Generation checks requested sentence/paragraph counts and constrains action fields to documented steps, but generated content should still be reviewed against the source journal. Full-report drafting supports `DEEPSEEK_API_KEY` and provider selection, but not the plural `DEEPSEEK_API_KEYS` setting.
 
 ## Notes
 
