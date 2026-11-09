@@ -274,7 +274,6 @@ type AIGenerationLength = {
 
 type AIGenerationOptions = AIGenerationLength & {
   focus: string;
-  sentencesPerParagraph: number;
 };
 
 function aiText(value: string, maxLength = 1000): string {
@@ -1499,7 +1498,6 @@ export default function Home() {
     focus: string;
     unit: AIGenerationLength['unit'];
     count: number;
-    sentencesPerParagraph: number;
   } | null>(null);
   const previewContainerRef = useRef<HTMLDivElement>(null);
   const previewRequestRef = useRef<AbortController | null>(null);
@@ -1879,7 +1877,6 @@ export default function Home() {
           instructions,
           outputUnit: options.unit,
           outputCount: options.count,
-          sentencesPerParagraph: options.sentencesPerParagraph,
         }),
       });
       const result: unknown = await response.json().catch(() => null);
@@ -1995,7 +1992,6 @@ export default function Home() {
           instructions: 'Summarize only the selected week activities into a coherent weekly OJT narrative. Do not invent activities, dates, hours, or skills.',
           outputUnit: options.unit,
           outputCount: options.count,
-          sentencesPerParagraph: options.sentencesPerParagraph,
         }),
       });
       const result: unknown = await response.json().catch(() => null);
@@ -2057,7 +2053,6 @@ export default function Home() {
           instructions: 'Draft this accomplishment using only clearly visible, unambiguous work evidence from the photo and details provided for this day. Do not invent a task, role, procedure, or result.',
           outputUnit: editor.unit,
           outputCount: editor.count,
-          sentencesPerParagraph: editor.sentencesPerParagraph,
         }),
       });
       const result: unknown = await response.json().catch(() => null);
@@ -2306,7 +2301,6 @@ export default function Home() {
       focus: '',
       unit: 'paragraphs',
       count: 1,
-      sentencesPerParagraph: 2,
     });
   };
 
@@ -2539,7 +2533,6 @@ export default function Home() {
             : `Write a concise monthly Learning / Experience narrative for ${monthLabel}. Include the user's focus as their account of what they learned or experienced, and use the uploaded photos for relevant context. Do not infer personal learning, feelings, skills, or growth from photos alone or invent details beyond the user's focus and photos.`,
           outputUnit: options.unit,
           outputCount: options.count,
-          sentencesPerParagraph: options.sentencesPerParagraph,
         }),
       });
       const result: unknown = await response.json().catch(() => null);
@@ -2992,7 +2985,7 @@ export default function Home() {
                   placeholder="Add details to focus on (optional)"
                   className="w-full rounded-xl border border-violet-400/25 bg-violet-500/[0.06] px-3 py-2.5 text-sm text-slate-100 placeholder:text-slate-500 focus:border-violet-400 focus:outline-none"
                 />
-                <div className={`grid gap-3 ${mobileAccomplishmentEditor.unit === 'paragraphs' ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
+                <div className="grid gap-3 sm:grid-cols-2">
                   <label className="block text-[10px] font-bold uppercase tracking-[0.16em] text-violet-300">
                     Output type
                     <select
@@ -3022,23 +3015,6 @@ export default function Home() {
                       ))}
                     </select>
                   </label>
-                  {mobileAccomplishmentEditor.unit === 'paragraphs' && (
-                    <label className="block text-[10px] font-bold uppercase tracking-[0.16em] text-violet-300">
-                      Sentences per paragraph
-                      <select
-                        value={mobileAccomplishmentEditor.sentencesPerParagraph}
-                        onChange={(event) => setMobileAccomplishmentEditor((current) => current ? {
-                          ...current,
-                          sentencesPerParagraph: Number(event.target.value),
-                        } : current)}
-                        className="mt-1.5 min-h-11 w-full rounded-xl border border-slate-700 bg-slate-900 px-3 text-sm font-medium normal-case tracking-normal text-slate-100 focus:border-violet-400 focus:outline-none"
-                      >
-                        {Array.from({ length: 10 }, (_, index) => index + 1).map((count) => (
-                          <option key={count} value={count}>{count}</option>
-                        ))}
-                      </select>
-                    </label>
-                  )}
                 </div>
               </div>
               {dailyJournalGenerationError?.weekIndex === mobileAccomplishmentEditor.weekIndex
@@ -4712,7 +4688,6 @@ function ExpandableTextarea({
   const [generationTopic, setGenerationTopic] = useState('');
   const [generationUnit, setGenerationUnit] = useState<AIGenerationLength['unit']>('paragraphs');
   const [generationCount, setGenerationCount] = useState(1);
-  const [generationSentencesPerParagraph, setGenerationSentencesPerParagraph] = useState(2);
   const [generationError, setGenerationError] = useState('');
 
   useEffect(() => {
@@ -4734,7 +4709,6 @@ function ExpandableTextarea({
     setGenerationTopic('');
     setGenerationUnit('paragraphs');
     setGenerationCount(1);
-    setGenerationSentencesPerParagraph(2);
     setGenerationError('');
     setIsOpen(true);
   };
@@ -4796,7 +4770,7 @@ function ExpandableTextarea({
                     placeholder="Add details to focus on (optional)"
                     className="w-full rounded-xl border border-violet-400/25 bg-violet-500/[0.06] px-3 py-2.5 text-sm text-slate-100 placeholder:text-slate-500 focus:border-violet-400 focus:outline-none"
                   />
-                  <div className={`grid gap-3 ${generationUnit === 'paragraphs' ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
+                  <div className="grid gap-3 sm:grid-cols-2">
                     <label className="block text-[10px] font-bold uppercase tracking-[0.16em] text-violet-300">
                       Output type
                       <select
@@ -4820,20 +4794,6 @@ function ExpandableTextarea({
                         ))}
                       </select>
                     </label>
-                    {generationUnit === 'paragraphs' && (
-                      <label className="block text-[10px] font-bold uppercase tracking-[0.16em] text-violet-300">
-                        Sentences per paragraph
-                        <select
-                          value={generationSentencesPerParagraph}
-                          onChange={(event) => setGenerationSentencesPerParagraph(Number(event.target.value))}
-                          className="mt-1.5 min-h-11 w-full rounded-xl border border-slate-700 bg-slate-900 px-3 text-sm font-medium normal-case tracking-normal text-slate-100 focus:border-violet-400 focus:outline-none"
-                        >
-                          {Array.from({ length: 10 }, (_, index) => index + 1).map((count) => (
-                            <option key={count} value={count}>{count}</option>
-                          ))}
-                        </select>
-                      </label>
-                    )}
                   </div>
                 </div>
               )}
@@ -4853,7 +4813,6 @@ function ExpandableTextarea({
                           focus: generationTopic,
                           unit: generationUnit,
                           count: generationCount,
-                          sentencesPerParagraph: generationSentencesPerParagraph,
                         });
                         if (!generatedText?.trim()) {
                           throw new Error('The AI service returned no text. Please try again.');
