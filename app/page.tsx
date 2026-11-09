@@ -3874,7 +3874,7 @@ export default function Home() {
               <div className="space-y-4 sm:space-y-5">
                 <label className="block text-xs sm:text-sm font-medium text-slate-200">
                   <span className="text-violet-300/70 text-[10px] uppercase tracking-wider block mb-1">Self-Evaluation</span>
-                  <ExpandableTextarea title="Self-Evaluation" value={form.selfEvaluation} onChange={(value) => updateField('selfEvaluation', value)} rows={4} onGenerate={(topic) => generateFieldWithAI('selfEvaluation', 'Self-Evaluation', form.selfEvaluation, 'Write in first person using only reflections, skills, and growth explicitly supported by the report. Do not claim a skill or experience that is not documented.', topic)} generating={aiGenerating === 'selfEvaluation'} />
+                  <ExpandableTextarea title="Self-Evaluation" value={form.selfEvaluation} onChange={(value) => updateField('selfEvaluation', value)} rows={4} onGenerate={(topic) => generateFieldWithAI('selfEvaluation', 'Self-Evaluation', form.selfEvaluation, 'Use the user focus as the primary account of this reflection. Use the existing draft and report details only when they directly support that focus. Write in first person, and do not invent skills, feelings, or growth.', topic)} generating={aiGenerating === 'selfEvaluation'} />
                 </label>
                 <label className="block text-xs sm:text-sm font-medium text-slate-200">
                   <span className="text-violet-300/70 text-[10px] uppercase tracking-wider block mb-1">
@@ -3885,7 +3885,7 @@ export default function Home() {
                     value={form.relevancy}
                     onChange={(value) => updateField('relevancy', value)}
                     rows={4}
-                    onGenerate={(topic) => generateFieldWithAI('relevancy', 'Relevancy of the Organization', form.relevancy, 'Rewrite the user-provided explanation of relevance. Do not infer the student’s career goals, degree relevance, or learning outcomes.', topic)}
+                    onGenerate={(topic) => generateFieldWithAI('relevancy', 'Relevancy of the Organization', form.relevancy, 'Use the user focus as the primary account of why the organization or experience is relevant. Use other report details only when they directly support that focus. Do not infer career goals, degree relevance, or learning outcomes.', topic)}
                     generating={aiGenerating === 'relevancy'}
                   />
                 </label>
@@ -5083,7 +5083,7 @@ function PlacementNarrativeFields({
               value={placement.selfEvaluation}
               onChange={(value) => updateField('selfEvaluation', value)}
               rows={4}
-              {...schoolFieldAI('selfEvaluation', 'School OJT Self-Evaluation', 'Write in first person only from documented second-placement tasks, reflections, and outcomes. Do not claim a skill, achievement, or experience without supporting details.')}
+              {...schoolFieldAI('selfEvaluation', 'School OJT Self-Evaluation', 'Use the user focus as the primary account of this second-placement reflection. Use the existing draft and other second-placement details only when they directly support that focus. Write in first person and do not invent a skill, achievement, or experience.')}
             />
           </label>
           <label className="block text-xs sm:text-sm font-medium text-slate-200">
@@ -5095,7 +5095,7 @@ function PlacementNarrativeFields({
               value={placement.relevancy}
               onChange={(value) => updateField('relevancy', value)}
               rows={4}
-              {...schoolFieldAI('relevancy', 'School OJT Relevancy of the Organization', 'Rewrite only the user-provided explanation of relevance for this second placement. Do not infer the student’s course, career goals, or learning outcomes.')}
+              {...schoolFieldAI('relevancy', 'School OJT Relevancy of the Organization', 'Use the user focus as the primary account of why this second placement is relevant. Use other second-placement details only when they directly support that focus. Do not infer the student’s course, career goals, or learning outcomes.')}
             />
           </label>
         </div>

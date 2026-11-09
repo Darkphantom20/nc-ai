@@ -168,6 +168,7 @@ export async function POST(request: Request) {
     const primeNarrativeRequest = /prime report narrative/i.test(title);
     const issueRequest = /^(?:issue\s*\/\s*problem|problem)\s*[12]?$/i.test(title);
     const taskDutyRequest = /^(?:assigned tasks(?: and responsibilities)?|duties and procedures conformed)$/i.test(title.trim());
+    const reflectionRequest = /^(?:self-evaluation|relevancy of the organization|relevancy to course and goals)$/i.test(title.trim());
     const completedActionRequest = /\b(?:solution|action undertaken|strategy\s*\/\s*action)\b/i.test(title);
     const actionProblemNumber = title.match(/problem\s*([12])/i)?.[1];
     const schoolPlacementRequest = isRecord(body.sourceDetails)
@@ -305,6 +306,9 @@ export async function POST(request: Request) {
       taskDutyRequest
         ? 'This is a Tasks and Duties section. When a user focus is supplied, treat it as the primary instruction and authoritative account of the tasks to include. It overrides conflicting or unrelated wording in the current draft. Do not retain introduction, orientation, or team-introduction details when the focus asks for work responsibilities instead. Use journal entries only to clarify or corroborate tasks that match the focus; do not add unrelated activities just because they appear elsewhere in the journal.'
         : '',
+      reflectionRequest
+        ? 'This is a Reflections section. When user focus is supplied, treat it as the primary account of the reflection and the specific points to address. The existing draft and report context are secondary; use them only when directly relevant to the focus, and do not let unrelated journal activities redirect the reflection. Preserve the user’s meaning and do not invent feelings, skills, growth, course connections, or career goals.'
+        : '',
       monthlyImageJournalRequest
         ? 'For this monthly journal request, use both the attached photos and the user-provided focus as factual sources. Treat the focus as the user’s account of the activities or experience, even when the action is not visible in a photo. Incorporate the relevant focus details rather than replacing them with a generic description of the images. Use photos to add or clarify visible context, and do not invent facts beyond the focus and photos.'
         : '',
@@ -314,6 +318,8 @@ export async function POST(request: Request) {
           : 'For this completed-action field, the current section text is only a draft to revise and is not factual evidence; it may contain earlier unsupported AI claims. The matching problem is context, not proof of a solution. Use the user focus and weekly journal as evidence, and report completed actions only when those sources document them for this problem. If they do not document the steps actually taken, ask the user to provide them instead of generating an action.'
         : taskDutyRequest
           ? 'Use the user focus first. Use the current field draft and related weekly journal only for details that directly match the focus; exclude unrelated tasks and context.'
+          : reflectionRequest
+            ? 'Use the user focus first. Treat the current reflection draft and report details as supporting context only when they directly match the focus. Do not add unrelated activities or replace the requested reflection with a summary of the journal.'
           : monthlyImageJournalRequest
           ? 'Use only facts directly supported by the attached photos or explicitly provided in the user focus; do not rely on outside knowledge or assumptions.'
           : schoolPlacementRequest
@@ -364,12 +370,16 @@ export async function POST(request: Request) {
       currentText
         ? taskDutyRequest
           ? `Current field draft (secondary context only; do not preserve details that conflict with or fall outside the user's focus): ${currentText}`
-          : `Current text to improve: ${currentText}`
+          : reflectionRequest
+            ? `Current reflection draft (secondary context only; keep only details that support the user's focus): ${currentText}`
+            : `Current text to improve: ${currentText}`
         : '',
       focus
         ? taskDutyRequest
           ? `PRIMARY USER FOCUS — build this section around these requested tasks and details. Do not let the current draft or unrelated journal entries override or dilute it: ${focus}`
-          : `Optional user-provided focus and factual details: ${focus}`
+          : reflectionRequest
+            ? `PRIMARY REFLECTION FOCUS — follow these points and the user's account first. Include relevant details from other context only if they support this focus: ${focus}`
+            : `Optional user-provided focus and factual details: ${focus}`
         : '',
     ].filter(Boolean).join('\n\n');
 
