@@ -3834,11 +3834,11 @@ export default function Home() {
               <div className="space-y-4 sm:space-y-5">
                 <label className="block text-xs sm:text-sm font-medium text-slate-200">
                   <span className="text-emerald-300/70 text-[10px] uppercase tracking-wider block mb-1">Assigned Tasks</span>
-                  <ExpandableTextarea title="Assigned Tasks" value={form.tasks} onChange={(value) => updateField('tasks', value)} rows={4} onGenerate={(topic) => generateFieldWithAI('tasks', 'Assigned Tasks and Responsibilities', form.tasks, 'Rewrite only the tasks and responsibilities stated in the report. Do not add a learning outcome unless one is provided.', topic)} generating={aiGenerating === 'tasks'} />
+                  <ExpandableTextarea title="Assigned Tasks" value={form.tasks} onChange={(value) => updateField('tasks', value)} rows={4} onGenerate={(topic) => generateFieldWithAI('tasks', 'Assigned Tasks and Responsibilities', form.tasks, 'Treat the user focus as the primary instruction for which tasks to include. Use the existing draft and journal only for details directly matching that focus. Do not include an introduction, orientation, or team-introduction activity unless the focus asks for it. Do not invent duties or outcomes.', topic)} generating={aiGenerating === 'tasks'} />
                 </label>
                 <label className="block text-xs sm:text-sm font-medium text-slate-200">
                   <span className="text-blue-300/70 text-[10px] uppercase tracking-wider block mb-1">Procedures Conformed</span>
-                  <ExpandableTextarea title="Procedures Conformed" value={form.procedures} onChange={(value) => updateField('procedures', value)} rows={4} onGenerate={(topic) => generateFieldWithAI('procedures', 'Duties and Procedures Conformed', form.procedures, 'Describe only procedures, standards, or conduct explicitly stated as followed in the report. Do not assume common workplace procedures.', topic)} generating={aiGenerating === 'procedures'} />
+                  <ExpandableTextarea title="Procedures Conformed" value={form.procedures} onChange={(value) => updateField('procedures', value)} rows={4} onGenerate={(topic) => generateFieldWithAI('procedures', 'Duties and Procedures Conformed', form.procedures, 'Treat the user focus as the primary instruction for which procedures to describe. Use the existing draft and journal only for steps directly matching that focus. Do not introduce unrelated tasks or assume common workplace procedures.', topic)} generating={aiGenerating === 'procedures'} />
                 </label>
               </div>
             </SectionBlock>
@@ -5027,7 +5027,7 @@ function PlacementNarrativeFields({
               value={placement.tasks}
               onChange={(value) => updateField('tasks', value)}
               rows={4}
-              {...schoolFieldAI('tasks', 'School OJT Assigned Tasks', 'Describe only duties and tasks explicitly supplied for the second placement. Do not import work from the first placement or invent tools, procedures, or results.')}
+              {...schoolFieldAI('tasks', 'School OJT Assigned Tasks', 'Treat the user focus as the primary instruction for which second-placement tasks to include. Use the existing draft only for details that match the focus. Do not import work from the first placement, include unrelated introduction activities, or invent tools, procedures, or results.')}
             />
           </label>
           <label className="block text-xs sm:text-sm font-medium text-slate-200">
@@ -5037,7 +5037,7 @@ function PlacementNarrativeFields({
               value={placement.procedures}
               onChange={(value) => updateField('procedures', value)}
               rows={4}
-              {...schoolFieldAI('procedures', 'School OJT Procedures Conformed', 'Describe only procedures explicitly supplied for the second placement. Do not invent policies, standards, or steps.')}
+              {...schoolFieldAI('procedures', 'School OJT Procedures Conformed', 'Treat the user focus as the primary instruction for which second-placement procedures to describe. Use the existing draft only for steps that match the focus. Do not import work from the first placement or invent policies, standards, or steps.')}
             />
           </label>
         </div>

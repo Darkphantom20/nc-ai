@@ -151,7 +151,7 @@ function getMonthlyImageFormatAndDimensions(buffer: Buffer): {
 }
 
 function getMonthlyImageDimensions(width: number, height: number) {
-  const scale = Math.min(280 / width, 210 / height, 1);
+  const scale = Math.min(220 / width, 165 / height, 1);
   return {
     width: Math.max(1, Math.round(width * scale)),
     height: Math.max(1, Math.round(height * scale)),
@@ -265,7 +265,7 @@ export async function POST(request: Request) {
             ],
           }),
         },
-        footers: reportFooterChildren.length > 0 ? {
+        footers: data.appendices?.dailyJournalLayout !== 'monthly' && reportFooterChildren.length > 0 ? {
           default: new Footer({
             children: reportFooterChildren,
           }),
