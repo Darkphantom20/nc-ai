@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { createClient } from '@supabase/supabase-js';
-import { Document, Packer, Paragraph, TextRun, AlignmentType, ImageRun, Header, Footer, Table, TableRow, TableCell, WidthType, BorderStyle, TableLayoutType } from 'docx';
+import { Document, Packer, Paragraph, TextRun, AlignmentType, ImageRun, Header, Footer, Table, TableRow, TableCell, WidthType, BorderStyle, TableLayoutType, TabStopType } from 'docx';
 import { getMonthlyJournalGroups, type MonthlyJournalSummary } from '../../../lib/monthly-journal';
 
 export const runtime = 'nodejs';
@@ -100,6 +100,62 @@ function parseBase64Image(base64String: string): Buffer | null {
     console.error("Failed to parse image", err);
     return null;
   }
+}
+
+function getMonthlyImageFormatAndDimensions(buffer: Buffer): {
+  type: 'jpg' | 'png';
+  width: number;
+  height: number;
+} | null {
+  if (buffer.length >= 24
+    && buffer[0] === 0x89
+    && buffer.toString('ascii', 1, 4) === 'PNG'
+    && buffer.toString('ascii', 4, 8) === '\r\n\x1a\n') {
+    return {
+      type: 'png',
+      width: buffer.readUInt32BE(16),
+      height: buffer.readUInt32BE(20),
+    };
+  }
+
+  if (buffer[0] !== 0xff || buffer[1] !== 0xd8) return null;
+  const frameMarkers = new Set([0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf]);
+  let offset = 2;
+  while (offset + 4 < buffer.length) {
+    if (buffer[offset] !== 0xff) {
+      offset += 1;
+      continue;
+    }
+
+    while (buffer[offset] === 0xff) offset += 1;
+    if (offset >= buffer.length) return null;
+    const marker = buffer[offset];
+    offset += 1;
+    if (marker === 0xd9 || marker === 0xda) break;
+    if (marker >= 0xd0 && marker <= 0xd7) continue;
+
+    if (offset + 2 > buffer.length) return null;
+    const segmentLength = buffer.readUInt16BE(offset);
+    if (segmentLength < 2 || offset + segmentLength > buffer.length) return null;
+    if (frameMarkers.has(marker)) {
+      return {
+        type: 'jpg',
+        height: buffer.readUInt16BE(offset + 3),
+        width: buffer.readUInt16BE(offset + 5),
+      };
+    }
+    offset += segmentLength;
+  }
+
+  return null;
+}
+
+function getMonthlyImageDimensions(width: number, height: number) {
+  const scale = Math.min(280 / width, 210 / height, 1);
+  return {
+    width: Math.max(1, Math.round(width * scale)),
+    height: Math.max(1, Math.round(height * scale)),
+  };
 }
 
 export async function POST(request: Request) {
@@ -433,7 +489,7 @@ function buildMonthlyJournalPages(appendices: AppendicesData): (Paragraph | Tabl
 
     children.push(
       new Paragraph({
-        tabStops: [{ type: 'left', position: 4680 }],
+        tabStops: [{ type: TabStopType.RIGHT, position: 9360 }],
         spacing: { before: 0, after: 0, line: 276, lineRule: 'auto' },
         children: [
           new TextRun({ text: 'Actual Duty Days', bold: true, size: 22, font: 'Times New Roman' }),
@@ -442,7 +498,7 @@ function buildMonthlyJournalPages(appendices: AppendicesData): (Paragraph | Tabl
         ],
       }),
       new Paragraph({
-        tabStops: [{ type: 'left', position: 4680 }],
+        tabStops: [{ type: TabStopType.RIGHT, position: 9360 }],
         spacing: { before: 0, after: 0, line: 276, lineRule: 'auto' },
         children: [
           new TextRun({ text: month.actualDutyDays, size: 22, font: 'Times New Roman' }),
@@ -496,48 +552,59 @@ function buildMonthlyJournalPages(appendices: AppendicesData): (Paragraph | Tabl
     if (photos.length > 0) {
       const captionedPhotos = photos.map((photo) => {
         const detail = typeof photo === 'string' ? '' : photo.detail?.trim() || '';
-        const caption = `Figure ${figureNumber++}${detail ? `: ${detail}` : ': Monthly journal photo'}`;
         const base64 = typeof photo === 'string' ? photo : photo.base64;
         const buffer = parseBase64Image(base64);
-        return buffer ? { buffer, caption } : null;
+        const format = buffer ? getMonthlyImageFormatAndDimensions(buffer) : null;
+        return buffer && format && format.width > 0 && format.height > 0
+          ? {
+              buffer,
+              caption: `Figure ${figureNumber++}${detail ? `: ${detail}` : ': Monthly journal photo'}`,
+              ...format,
+              transformation: getMonthlyImageDimensions(format.width, format.height),
+            }
+          : null;
       });
       const validPhotos = captionedPhotos.filter((photo): photo is NonNullable<typeof photo> => photo !== null);
       for (let index = 0; index < validPhotos.length; index += 2) {
         const pair = validPhotos.slice(index, index + 2);
-        children.push(
-          new Paragraph({
-            alignment: pair.length === 1 ? AlignmentType.CENTER : AlignmentType.LEFT,
-            tabStops: [{ type: 'left', position: 4680 }],
-            spacing: { before: 120, after: 0 },
-            children: [
-              new ImageRun({
-                type: 'png',
-                data: pair[0].buffer,
-                transformation: { width: 280, height: 210 },
-              }),
-              ...(pair.length === 2 ? [
-                new TextRun({ text: '\t' }),
+        const photoCells = pair.map((photo) => new TableCell({
+          width: { size: pair.length === 1 ? 100 : 50, type: WidthType.PERCENTAGE },
+          margins: { top: 100, bottom: 100, left: 80, right: 80 },
+          children: [
+            new Paragraph({
+              alignment: AlignmentType.CENTER,
+              spacing: { before: 0, after: 40 },
+              keepNext: true,
+              children: [
                 new ImageRun({
-                  type: 'png' as const,
-                  data: pair[1].buffer,
-                  transformation: { width: 280, height: 210 },
+                  type: photo.type,
+                  data: photo.buffer,
+                  transformation: photo.transformation,
                 }),
-              ] : []),
-            ],
-          }),
-          new Paragraph({
-            alignment: pair.length === 1 ? AlignmentType.CENTER : AlignmentType.LEFT,
-            tabStops: [{ type: 'left', position: 4680 }],
-            spacing: { before: 0, after: 120 },
-            children: [
-              new TextRun({ text: pair[0].caption, size: 24, font: 'Times New Roman' }),
-              ...(pair.length === 2 ? [
-                new TextRun({ text: '\t', size: 24, font: 'Times New Roman' }),
-                new TextRun({ text: pair[1].caption, size: 24, font: 'Times New Roman' }),
-              ] : []),
-            ],
-          }),
-        );
+              ],
+            }),
+            new Paragraph({
+              alignment: AlignmentType.CENTER,
+              spacing: { before: 0, after: 0 },
+              children: [new TextRun({ text: photo.caption, size: 22, font: 'Times New Roman' })],
+            }),
+          ],
+        }));
+        const invisibleBorder = { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' };
+        children.push(new Table({
+          rows: [new TableRow({ cantSplit: true, children: photoCells })],
+          width: { size: 100, type: WidthType.PERCENTAGE },
+          columnWidths: pair.length === 1 ? [9360] : [4680, 4680],
+          layout: TableLayoutType.FIXED,
+          borders: {
+            top: invisibleBorder,
+            bottom: invisibleBorder,
+            left: invisibleBorder,
+            right: invisibleBorder,
+            insideHorizontal: invisibleBorder,
+            insideVertical: invisibleBorder,
+          },
+        }));
       }
     }
   });
