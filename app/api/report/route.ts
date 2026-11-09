@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { createClient } from '@supabase/supabase-js';
 import { Document, Packer, Paragraph, TextRun, AlignmentType, ImageRun, Header, Footer, Table, TableRow, TableCell, WidthType, BorderStyle, TableLayoutType } from 'docx';
+import { getMonthlyJournalGroups, type MonthlyJournalSummary } from '../../../lib/monthly-journal';
 
 export const runtime = 'nodejs';
 
@@ -43,7 +44,8 @@ interface ReportFooterData {
 }
 
 interface AppendicesData {
-  dailyJournalLayout?: 'current' | 'report' | 'no-photo';
+  dailyJournalLayout?: 'current' | 'report' | 'no-photo' | 'monthly';
+  dailyJournalMonthlySummaries?: Record<string, MonthlyJournalSummary>;
   reportFooter?: ReportFooterData;
   dailyJournal?: DailyJournalWeek[];
   certParticipation?: string;
@@ -403,6 +405,118 @@ function buildTemplateTableOfContents(data: any): any[] {
   }));
 }
 
+function buildMonthlyJournalPages(appendices: AppendicesData): (Paragraph | Table)[] {
+  const weeks = appendices.dailyJournal || [];
+  const groups = getMonthlyJournalGroups(weeks, appendices.dailyJournalMonthlySummaries);
+  const children: (Paragraph | Table)[] = [
+    new Paragraph({
+      alignment: AlignmentType.CENTER,
+      spacing: { before: 180, after: 240, line: 360, lineRule: 'auto' },
+      children: [new TextRun({ text: 'MONTHLY JOURNAL', bold: true, size: 24, font: 'Times New Roman' })],
+    }),
+  ];
+  const photoWeeksIncluded = new Set<number>();
+
+  groups.forEach((month, monthIndex) => {
+    children.push(
+      new Paragraph({
+        alignment: AlignmentType.CENTER,
+        spacing: { before: 120, after: 120, line: 360, lineRule: 'auto' },
+        pageBreakBefore: monthIndex > 0,
+        keepNext: true,
+        children: [new TextRun({ text: month.label, bold: true, size: 24, font: 'Times New Roman' })],
+      }),
+    );
+
+    if (month.periodCovered) {
+      children.push(new Paragraph({
+        alignment: AlignmentType.CENTER,
+        spacing: { after: 120, line: 360, lineRule: 'auto' },
+        children: [new TextRun({ text: `Period Covered: ${month.periodCovered}`, size: 24, font: 'Times New Roman' })],
+      }));
+    }
+
+    const summaryCell = (text: string, bold = false) => new TableCell({
+      width: { size: 50, type: WidthType.PERCENTAGE },
+      margins: { top: 50, bottom: 50, left: 80, right: 80 },
+      children: [new Paragraph({
+        alignment: AlignmentType.CENTER,
+        spacing: { before: 0, after: 0 },
+        children: [new TextRun({ text, bold, size: 22, font: 'Times New Roman' })],
+      })],
+    });
+    children.push(new Table({
+      rows: [
+        new TableRow({
+          cantSplit: true,
+          children: [summaryCell('Actual Duty Days', true), summaryCell('Total Hours Rendered', true)],
+        }),
+        new TableRow({
+          cantSplit: true,
+          children: [summaryCell(month.actualDutyDays), summaryCell(month.totalHoursRendered)],
+        }),
+      ],
+      alignment: AlignmentType.CENTER,
+      width: { size: 100, type: WidthType.PERCENTAGE },
+      columnWidths: [5000, 5000],
+      borders: {
+        top: { style: BorderStyle.SINGLE, size: 1, color: '000000' },
+        bottom: { style: BorderStyle.SINGLE, size: 1, color: '000000' },
+        left: { style: BorderStyle.SINGLE, size: 1, color: '000000' },
+        right: { style: BorderStyle.SINGLE, size: 1, color: '000000' },
+        insideHorizontal: { style: BorderStyle.SINGLE, size: 1, color: '000000' },
+        insideVertical: { style: BorderStyle.SINGLE, size: 1, color: '000000' },
+      },
+    }));
+
+    children.push(new Paragraph({
+      alignment: AlignmentType.LEFT,
+      spacing: { before: 180, after: 60, line: 360, lineRule: 'auto' },
+      keepNext: true,
+      children: [new TextRun({ text: 'Activities Performed', bold: true, size: 24, font: 'Times New Roman' })],
+    }));
+    if (month.activitiesPerformed) {
+      month.activitiesPerformed.split(/\n+/).filter((paragraph) => paragraph.trim()).forEach((paragraph) => {
+        children.push(new Paragraph({
+          alignment: AlignmentType.JUSTIFIED,
+          spacing: { after: 80, line: 360, lineRule: 'auto' },
+          children: [new TextRun({ text: paragraph.trim(), size: 24, font: 'Times New Roman' })],
+        }));
+      });
+    }
+
+    const activities = month.activities.map(({ activity }) => activity);
+    children.push(buildCurrentWeeklyTable(activities, month.totalHoursRendered));
+
+    children.push(new Paragraph({
+      alignment: AlignmentType.LEFT,
+      spacing: { before: 180, after: 60, line: 360, lineRule: 'auto' },
+      keepNext: true,
+      children: [new TextRun({ text: 'Learning / Experience', bold: true, size: 24, font: 'Times New Roman' })],
+    }));
+    if (month.learningExperience) {
+      month.learningExperience.split(/\n+/).filter((paragraph) => paragraph.trim()).forEach((paragraph) => {
+        children.push(new Paragraph({
+          alignment: AlignmentType.JUSTIFIED,
+          spacing: { after: 80, line: 360, lineRule: 'auto' },
+          children: [new TextRun({ text: paragraph.trim(), size: 24, font: 'Times New Roman' })],
+        }));
+      });
+    }
+
+    const photoWeekIndices = Array.from(new Set(month.activities.map(({ weekIndex }) => weekIndex)))
+      .filter((weekIndex) => !photoWeeksIncluded.has(weekIndex));
+    const photos = photoWeekIndices.flatMap((weekIndex) => {
+      photoWeeksIncluded.add(weekIndex);
+      const week = weeks[weekIndex];
+      return (week?.currentLayoutImages || week?.images || []).filter(Boolean) as (string | AppendixImage)[];
+    });
+    if (photos.length > 0) children.push(buildImageGridTable(photos));
+  });
+
+  return children;
+}
+
 function buildTemplateDailyJournal(appendices: AppendicesData | undefined): (Paragraph | Table)[] {
   if (!appendices?.dailyJournal?.length) return [];
   const children: (Paragraph | Table)[] = [
@@ -414,7 +528,14 @@ function buildTemplateDailyJournal(appendices: AppendicesData | undefined): (Par
   ];
   const layout = appendices.dailyJournalLayout === 'no-photo'
     ? 'no-photo'
-    : appendices.dailyJournalLayout === 'report' ? 'report' : 'current';
+    : appendices.dailyJournalLayout === 'report'
+      ? 'report'
+      : appendices.dailyJournalLayout === 'monthly' ? 'monthly' : 'current';
+
+  if (layout === 'monthly') {
+    children.push(...buildMonthlyJournalPages(appendices));
+    return children;
+  }
 
   appendices.dailyJournal.forEach((week, index) => {
     if (layout === 'report') {
@@ -1632,7 +1753,14 @@ function buildDailyJournalAppendixPage(appendicesData: AppendicesData) {
 
   const layout = appendicesData.dailyJournalLayout === 'no-photo'
     ? 'no-photo'
-    : appendicesData.dailyJournalLayout === 'report' ? 'report' : 'current';
+    : appendicesData.dailyJournalLayout === 'report'
+      ? 'report'
+      : appendicesData.dailyJournalLayout === 'monthly' ? 'monthly' : 'current';
+
+  if (layout === 'monthly') {
+    children.push(...buildMonthlyJournalPages(appendicesData));
+    return children;
+  }
 
   if (layout === 'no-photo') {
     children.push(
