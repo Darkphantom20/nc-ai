@@ -5,7 +5,11 @@ import dynamic from 'next/dynamic';
 import Image from 'next/image';
 import { STATUS, type EventData, type Step } from 'react-joyride';
 import { HelpCircle, ImagePlus, ZoomIn, ZoomOut, Maximize2, X, Eye, FileText, Sparkles } from 'lucide-react';
-import { getMonthlyJournalGroups, type MonthlyJournalSummary } from '../lib/monthly-journal';
+import {
+  getMonthlyJournalGroups,
+  getNextMonthlyJournalKey,
+  type MonthlyJournalSummary,
+} from '../lib/monthly-journal';
 import guideScene from '../05c9cb1a-009e-4c61-ab2f-30d279b5a02c.jpg';
 import memeScene from '../memes.gif';
 import completionScene from '../c0b37494-6751-46ac-9eae-3abd056aa8bf.jpg';
@@ -2210,6 +2214,32 @@ export default function Home() {
     });
   };
 
+  const addMonth = () => {
+    setForm((prev) => {
+      const monthKey = getNextMonthlyJournalKey(
+        prev.appendices.dailyJournal,
+        prev.appendices.dailyJournalMonthlySummaries,
+      );
+      return {
+        ...prev,
+        appendices: {
+          ...prev.appendices,
+          dailyJournalMonthlySummaries: {
+            ...prev.appendices.dailyJournalMonthlySummaries,
+            [monthKey]: {
+              periodCovered: '',
+              actualDutyDays: '',
+              totalHoursRendered: '',
+              activitiesPerformed: '',
+              learningExperience: '',
+            },
+          },
+        },
+      };
+    });
+    setStatus('Added a monthly journal section');
+  };
+
   const removeWeek = (weekIndex: number) => {
     setForm((prev) => {
       const updated = prev.appendices.dailyJournal.filter((_, idx) => idx !== weekIndex);
@@ -3790,8 +3820,12 @@ export default function Home() {
                           <FileText size={15} aria-hidden="true" />
                           {isImportingJournal ? 'Reading DOCX...' : 'Import DOCX'}
                         </button>
-                        <button type="button" onClick={addWeek} className="rounded-xl bg-cyan-500/20 px-3 sm:px-3.5 py-2.5 sm:py-2 text-xs font-semibold text-cyan-300 hover:bg-cyan-500/30 transition active:scale-95 whitespace-nowrap">
-                          + Add Week
+                        <button
+                          type="button"
+                          onClick={form.appendices.dailyJournalLayout === 'monthly' ? addMonth : addWeek}
+                          className="rounded-xl bg-cyan-500/20 px-3 sm:px-3.5 py-2.5 sm:py-2 text-xs font-semibold text-cyan-300 hover:bg-cyan-500/30 transition active:scale-95 whitespace-nowrap"
+                        >
+                          {form.appendices.dailyJournalLayout === 'monthly' ? '+ Add Month' : '+ Add Week'}
                         </button>
                       </div>
                     </div>
@@ -3836,7 +3870,9 @@ export default function Home() {
                           <header className="flex flex-wrap items-center justify-between gap-2">
                             <h3 className="text-lg font-bold text-white">{month.label}</h3>
                             <span className="text-xs text-slate-400">
-                              {month.activities.length} journal {month.activities.length === 1 ? 'day' : 'days'}
+                              {month.activities.length > 0
+                                ? `${month.activities.length} journal ${month.activities.length === 1 ? 'day' : 'days'}`
+                                : 'Monthly summary'}
                             </span>
                           </header>
                           <div className="grid gap-3 sm:grid-cols-2">

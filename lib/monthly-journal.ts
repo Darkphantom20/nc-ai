@@ -61,11 +61,14 @@ export function getMonthlyJournalGroups(
   summaries: Record<string, MonthlyJournalSummary> = {},
 ): MonthlyJournalGroup[] {
   const groups = new Map<string, MonthlyJournalGroup>();
-  const explicitYears = new Set(
-    weeks.flatMap((week) => week.activities
+  const explicitYears = new Set([
+    ...weeks.flatMap((week) => week.activities
       .map((activity) => getActivityMonth(activity.date)?.year || '')
       .filter(Boolean)),
-  );
+    ...Object.keys(summaries)
+      .map((key) => key.match(/^(\d{4})-\d{1,2}$/)?.[1] || '')
+      .filter(Boolean),
+  ]);
   const inferredYear = explicitYears.size === 1 ? Array.from(explicitYears)[0] : '';
 
   weeks.forEach((week, weekIndex) => {
@@ -88,6 +91,23 @@ export function getMonthlyJournalGroups(
       };
       group.activities.push({ weekIndex, dayIndex, weekNumber: week.weekNumber, activity });
       groups.set(key, group);
+    });
+  });
+
+  Object.keys(summaries).forEach((key) => {
+    if (groups.has(key)) return;
+    const keyMatch = key.match(/^(\d{4}|unspecified)-(\d{1,2})$/);
+    const monthIndex = keyMatch ? Number(keyMatch[2]) - 1 : -1;
+    if (monthIndex < 0 || monthIndex >= MONTHS.length) return;
+    groups.set(key, {
+      key,
+      label: `${MONTHS[monthIndex].toUpperCase()}${keyMatch?.[1] === 'unspecified' ? '' : ` ${keyMatch?.[1]}`}`,
+      activities: [],
+      periodCovered: '',
+      actualDutyDays: '',
+      totalHoursRendered: '',
+      activitiesPerformed: '',
+      learningExperience: '',
     });
   });
 
@@ -121,4 +141,33 @@ export function getMonthlyJournalGroups(
         learningExperience: summary.learningExperience ?? '',
       };
     });
+}
+
+export function getNextMonthlyJournalKey(
+  weeks: readonly MonthlyJournalWeek[],
+  summaries: Record<string, MonthlyJournalSummary> = {},
+  now = new Date(),
+): string {
+  const months = getMonthlyJournalGroups(weeks, summaries)
+    .map(({ key }) => {
+      const match = key.match(/^(\d{4}|unspecified)-(\d{1,2})$/);
+      if (!match) return null;
+      return { year: match[1], month: Number(match[2]) };
+    })
+    .filter((month): month is { year: string; month: number } => month !== null)
+    .sort((left, right) => (
+      left.year === right.year
+        ? left.month - right.month
+        : left.year === 'unspecified'
+          ? -1
+          : right.year === 'unspecified'
+            ? 1
+            : Number(left.year) - Number(right.year)
+    ));
+  const latest = months[months.length - 1];
+  if (!latest) return `${now.getFullYear()}-${now.getMonth() + 1}`;
+
+  if (latest.month < 12) return `${latest.year}-${latest.month + 1}`;
+  if (latest.year === 'unspecified') return `${now.getFullYear() + 1}-1`;
+  return `${Number(latest.year) + 1}-1`;
 }

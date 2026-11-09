@@ -408,14 +408,9 @@ function buildTemplateTableOfContents(data: any): any[] {
 function buildMonthlyJournalPages(appendices: AppendicesData): (Paragraph | Table)[] {
   const weeks = appendices.dailyJournal || [];
   const groups = getMonthlyJournalGroups(weeks, appendices.dailyJournalMonthlySummaries);
-  const children: (Paragraph | Table)[] = [
-    new Paragraph({
-      alignment: AlignmentType.CENTER,
-      spacing: { before: 180, after: 240, line: 360, lineRule: 'auto' },
-      children: [new TextRun({ text: 'MONTHLY JOURNAL', bold: true, size: 24, font: 'Times New Roman' })],
-    }),
-  ];
+  const children: (Paragraph | Table)[] = [];
   const photoWeeksIncluded = new Set<number>();
+  let figureNumber = 1;
 
   groups.forEach((month, monthIndex) => {
     children.push(
@@ -438,10 +433,10 @@ function buildMonthlyJournalPages(appendices: AppendicesData): (Paragraph | Tabl
 
     const summaryCell = (text: string, bold = false) => new TableCell({
       width: { size: 50, type: WidthType.PERCENTAGE },
-      margins: { top: 50, bottom: 50, left: 80, right: 80 },
+      margins: { top: 15, bottom: 15, left: 100, right: 100 },
       children: [new Paragraph({
-        alignment: AlignmentType.CENTER,
-        spacing: { before: 0, after: 0 },
+        alignment: AlignmentType.LEFT,
+        spacing: { before: 0, after: 0, line: 276, lineRule: 'auto' },
         children: [new TextRun({ text, bold, size: 22, font: 'Times New Roman' })],
       })],
     });
@@ -460,12 +455,12 @@ function buildMonthlyJournalPages(appendices: AppendicesData): (Paragraph | Tabl
       width: { size: 100, type: WidthType.PERCENTAGE },
       columnWidths: [5000, 5000],
       borders: {
-        top: { style: BorderStyle.SINGLE, size: 1, color: '000000' },
-        bottom: { style: BorderStyle.SINGLE, size: 1, color: '000000' },
-        left: { style: BorderStyle.SINGLE, size: 1, color: '000000' },
-        right: { style: BorderStyle.SINGLE, size: 1, color: '000000' },
-        insideHorizontal: { style: BorderStyle.SINGLE, size: 1, color: '000000' },
-        insideVertical: { style: BorderStyle.SINGLE, size: 1, color: '000000' },
+        top: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
+        bottom: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
+        left: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
+        right: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
+        insideHorizontal: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
+        insideVertical: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
       },
     }));
 
@@ -484,9 +479,6 @@ function buildMonthlyJournalPages(appendices: AppendicesData): (Paragraph | Tabl
         }));
       });
     }
-
-    const activities = month.activities.map(({ activity }) => activity);
-    children.push(buildCurrentWeeklyTable(activities, month.totalHoursRendered));
 
     children.push(new Paragraph({
       alignment: AlignmentType.LEFT,
@@ -511,7 +503,19 @@ function buildMonthlyJournalPages(appendices: AppendicesData): (Paragraph | Tabl
       const week = weeks[weekIndex];
       return (week?.currentLayoutImages || week?.images || []).filter(Boolean) as (string | AppendixImage)[];
     });
-    if (photos.length > 0) children.push(buildImageGridTable(photos));
+    if (photos.length > 0) {
+      const captionedPhotos = photos.map((photo) => {
+        const detail = typeof photo === 'string' ? '' : photo.detail?.trim() || '';
+        const caption = `Figure ${figureNumber++}${detail ? `: ${detail}` : ': Monthly journal photo'}`;
+        return typeof photo === 'string'
+          ? { base64: photo, detail: caption }
+          : { ...photo, detail: caption };
+      });
+      children.push(
+        new Paragraph({ spacing: { before: 120, after: 0 } }),
+        buildImageGridTable(captionedPhotos),
+      );
+    }
   });
 
   return children;
