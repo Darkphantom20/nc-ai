@@ -2529,8 +2529,8 @@ export default function Home() {
           imageData: photos.map((photo) => photo.base64),
           focus: aiText(options.focus, 2000),
           instructions: field === 'activitiesPerformed'
-            ? `Write one concise monthly Activities Performed paragraph based only on what is clearly visible in this month's uploaded photos (${monthLabel}). Describe observable activities without claiming the student personally performed them, or inventing dates, duties, results, or context.`
-            : `Write one concise monthly Learning / Experience paragraph based only on clear learning evidence visible in this month's uploaded photos (${monthLabel}). Do not infer the student's feelings, skills, lessons, or personal growth. If personal learning is not visible, briefly ask the user to add their reflection instead of guessing.`,
+            ? `Write a concise monthly Activities Performed narrative for ${monthLabel}. Use the user's focus as the main points and factual account of what they did; use the uploaded photos to add relevant visible context. Do not invent dates, duties, or results not provided in the focus or photos.`
+            : `Write a concise monthly Learning / Experience narrative for ${monthLabel}. Include the user's focus as their account of what they learned or experienced, and use the uploaded photos for relevant context. Do not infer personal learning, feelings, skills, or growth from photos alone or invent details beyond the user's focus and photos.`,
           outputUnit: options.unit,
           outputCount: options.count,
         }),
