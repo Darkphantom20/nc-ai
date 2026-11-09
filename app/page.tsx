@@ -223,10 +223,11 @@ type NarrativeJournalWeek = {
 };
 
 function getDailyJournalPhoto(
-  week: NarrativeJournalWeek,
+  week: NarrativeJournalWeek | undefined,
   dayIndex: number,
   layout: string,
 ): JournalPhoto | null {
+  if (!week) return null;
   const preferredImages = layout === 'report' ? week.reportLayoutImages : week.currentLayoutImages;
   const alternateImages = layout === 'report' ? week.currentLayoutImages : week.reportLayoutImages;
   return preferredImages?.[dayIndex] ?? alternateImages?.[dayIndex] ?? week.images?.[dayIndex] ?? null;
@@ -1485,6 +1486,9 @@ export default function Home() {
     weekIndex: number;
     dayIndex: number;
     draft: string;
+    focus: string;
+    unit: AIGenerationLength['unit'];
+    count: number;
   } | null>(null);
   const previewContainerRef = useRef<HTMLDivElement>(null);
   const previewRequestRef = useRef<AbortController | null>(null);
@@ -2004,8 +2008,11 @@ export default function Home() {
     }
   };
 
-  const generateDailyJournalAccomplishment = async (weekIndex: number, dayIndex: number) => {
+  const generateDailyJournalAccomplishment = async () => {
     if (aiGenerating) return;
+    const editor = mobileAccomplishmentEditor;
+    if (!editor) return;
+    const { weekIndex, dayIndex } = editor;
     const week = form.appendices.dailyJournal[weekIndex];
     const activity = week?.activities[dayIndex];
     const photo = week && getDailyJournalPhoto(week, dayIndex, form.appendices.dailyJournalLayout);
@@ -2033,9 +2040,10 @@ export default function Home() {
           },
           imageData: photo.base64,
           currentText: userProvidedText(activity.accomplishment, example, 1000),
-          instructions: 'Draft a short, factual entry for this exact day. Do not add a task or result that the photo and user notes do not support.',
-          outputUnit: 'paragraphs',
-          outputCount: 1,
+          focus: aiText(editor.focus, 2000),
+          instructions: 'Draft this accomplishment using only clearly visible, unambiguous work evidence from the photo and details provided for this day. Do not invent a task, role, procedure, or result.',
+          outputUnit: editor.unit,
+          outputCount: editor.count,
         }),
       });
       const result: unknown = await response.json().catch(() => null);
@@ -2049,11 +2057,12 @@ export default function Home() {
         throw new Error('The AI service returned no text. Please try again.');
       }
 
-      setMobileAccomplishmentEditor({
-        weekIndex,
-        dayIndex,
-        draft: result.text.trim(),
-      });
+      const generatedText = result.text.trim();
+      setMobileAccomplishmentEditor((current) => current
+        && current.weekIndex === weekIndex
+        && current.dayIndex === dayIndex
+        ? { ...current, draft: generatedText }
+        : current);
       setDailyJournalGenerationError(null);
       setStatus(`${activity.day || `Day ${dayIndex + 1}`} accomplishment drafted. Review it and select Save.`);
     } catch (error) {
@@ -2228,7 +2237,15 @@ export default function Home() {
   };
 
   const openMobileAccomplishmentEditor = (weekIndex: number, dayIndex: number, value: string) => {
-    setMobileAccomplishmentEditor({ weekIndex, dayIndex, draft: value });
+    setDailyJournalGenerationError(null);
+    setMobileAccomplishmentEditor({
+      weekIndex,
+      dayIndex,
+      draft: value,
+      focus: '',
+      unit: 'paragraphs',
+      count: 1,
+    });
   };
 
   const saveMobileAccomplishment = () => {
@@ -2761,21 +2778,91 @@ export default function Home() {
               placeholder="Describe your accomplishment"
               aria-label="Accomplishment details"
             />
-            <footer className="flex gap-3 border-t border-slate-800 bg-slate-950 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 sm:px-6 sm:pb-4">
-              <button
-                type="button"
-                onClick={() => setMobileAccomplishmentEditor(null)}
-                className="min-h-11 flex-1 rounded-xl border border-slate-700 bg-slate-900 px-4 text-sm font-semibold text-slate-200 sm:flex-none sm:min-w-28"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={saveMobileAccomplishment}
-                className="min-h-11 flex-1 rounded-xl bg-cyan-500 px-4 text-sm font-bold text-slate-950 sm:flex-none sm:min-w-28"
-              >
-                Save
-              </button>
+            <footer className="space-y-3 border-t border-slate-800 bg-slate-950 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 sm:px-6 sm:pb-4">
+              <div className="space-y-3">
+                <label htmlFor="journal-generation-focus" className="mb-1.5 block text-[10px] font-bold uppercase tracking-[0.16em] text-violet-300">
+                  Optional generation focus or main points
+                </label>
+                <input
+                  id="journal-generation-focus"
+                  value={mobileAccomplishmentEditor.focus}
+                  onChange={(event) => setMobileAccomplishmentEditor((current) => current ? { ...current, focus: event.target.value } : current)}
+                  placeholder="Add details to focus on (optional)"
+                  className="w-full rounded-xl border border-violet-400/25 bg-violet-500/[0.06] px-3 py-2.5 text-sm text-slate-100 placeholder:text-slate-500 focus:border-violet-400 focus:outline-none"
+                />
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="block text-[10px] font-bold uppercase tracking-[0.16em] text-violet-300">
+                    Output type
+                    <select
+                      value={mobileAccomplishmentEditor.unit}
+                      onChange={(event) => setMobileAccomplishmentEditor((current) => current ? {
+                        ...current,
+                        unit: event.target.value === 'sentences' ? 'sentences' : 'paragraphs',
+                      } : current)}
+                      className="mt-1.5 min-h-11 w-full rounded-xl border border-slate-700 bg-slate-900 px-3 text-sm font-medium normal-case tracking-normal text-slate-100 focus:border-violet-400 focus:outline-none"
+                    >
+                      <option value="paragraphs">Paragraphs</option>
+                      <option value="sentences">Sentences</option>
+                    </select>
+                  </label>
+                  <label className="block text-[10px] font-bold uppercase tracking-[0.16em] text-violet-300">
+                    Number of {mobileAccomplishmentEditor.unit}
+                    <select
+                      value={mobileAccomplishmentEditor.count}
+                      onChange={(event) => setMobileAccomplishmentEditor((current) => current ? {
+                        ...current,
+                        count: Number(event.target.value),
+                      } : current)}
+                      className="mt-1.5 min-h-11 w-full rounded-xl border border-slate-700 bg-slate-900 px-3 text-sm font-medium normal-case tracking-normal text-slate-100 focus:border-violet-400 focus:outline-none"
+                    >
+                      {Array.from({ length: 10 }, (_, index) => index + 1).map((count) => (
+                        <option key={count} value={count}>{count}</option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              </div>
+              {dailyJournalGenerationError?.weekIndex === mobileAccomplishmentEditor.weekIndex
+                && dailyJournalGenerationError.dayIndex === mobileAccomplishmentEditor.dayIndex && (
+                  <p role="alert" className="text-sm text-rose-300">{dailyJournalGenerationError.message}</p>
+                )}
+              <div className="flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={() => void generateDailyJournalAccomplishment()}
+                  disabled={
+                    Boolean(aiGenerating)
+                    || !getDailyJournalPhoto(
+                      form.appendices.dailyJournal[mobileAccomplishmentEditor.weekIndex],
+                      mobileAccomplishmentEditor.dayIndex,
+                      form.appendices.dailyJournalLayout,
+                    )
+                  }
+                  className="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl border border-violet-400/30 bg-violet-500/10 px-3 text-sm font-semibold text-violet-200 transition hover:bg-violet-500/20 disabled:cursor-not-allowed disabled:opacity-60 sm:flex-none sm:min-w-36"
+                >
+                  <Sparkles size={15} aria-hidden="true" />
+                  {aiGenerating === `journal-${mobileAccomplishmentEditor.weekIndex}-${mobileAccomplishmentEditor.dayIndex}`
+                    ? 'Generating...'
+                    : 'Generate with AI'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDailyJournalGenerationError(null);
+                    setMobileAccomplishmentEditor(null);
+                  }}
+                  className="min-h-11 flex-1 rounded-xl border border-slate-700 bg-slate-900 px-4 text-sm font-semibold text-slate-200 sm:flex-none sm:min-w-28"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={saveMobileAccomplishment}
+                  className="min-h-11 flex-1 rounded-xl bg-cyan-500 px-4 text-sm font-bold text-slate-950 sm:flex-none sm:min-w-28"
+                >
+                  Save
+                </button>
+              </div>
             </footer>
           </div>
         </div>
@@ -3757,23 +3844,11 @@ export default function Home() {
                                       <span className="line-clamp-2 min-w-0 flex-1 whitespace-pre-wrap break-words">{act.accomplishment || 'Tap to add accomplishment'}</span>
                                       <Maximize2 size={15} className="mt-0.5 shrink-0 text-cyan-300" aria-hidden="true" />
                                     </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => void generateDailyJournalAccomplishment(weekIdx, dayIdx)}
-                                      disabled={Boolean(aiGenerating) || !getDailyJournalPhoto(week, dayIdx, form.appendices.dailyJournalLayout)}
-                                      title={getDailyJournalPhoto(week, dayIdx, form.appendices.dailyJournalLayout) ? 'Generate an accomplishment from this day’s photo' : 'Attach a photo to this day first'}
-                                      className="mt-2 inline-flex min-h-9 w-full items-center justify-center gap-2 rounded-lg border border-violet-400/30 bg-violet-500/10 px-2.5 py-2 text-xs font-semibold text-violet-200 transition hover:bg-violet-500/20 disabled:cursor-not-allowed disabled:opacity-50"
-                                    >
-                                      <Sparkles size={14} aria-hidden="true" />
-                                      {aiGenerating === `journal-${weekIdx}-${dayIdx}` ? 'Generating...' : 'Generate with AI'}
-                                    </button>
-                                    {!getDailyJournalPhoto(week, dayIdx, form.appendices.dailyJournalLayout) && (
-                                      <p className="mt-1 text-[10px] text-slate-500">Attach a photo for this day first.</p>
-                                    )}
-                                    {dailyJournalGenerationError?.weekIndex === weekIdx
-                                      && dailyJournalGenerationError.dayIndex === dayIdx && (
-                                        <p role="alert" className="mt-1 text-xs text-rose-300">{dailyJournalGenerationError.message}</p>
-                                      )}
+                                    <p className="mt-1 text-[10px] text-slate-500">
+                                      {getDailyJournalPhoto(week, dayIdx, form.appendices.dailyJournalLayout)
+                                        ? 'Photo available for AI drafting.'
+                                        : 'Attach a photo to generate with AI.'}
+                                    </p>
                                   </div>
                                   <div className="border-t border-slate-800 p-3 sm:border-t-0 sm:border-l">
                                     <label htmlFor={`no-photo-hours-${weekIdx}-${dayIdx}`} className="mb-2 block text-[9px] font-bold uppercase tracking-[0.18em] text-slate-400 sm:hidden">No. of Working Hours</label>
@@ -3855,23 +3930,11 @@ export default function Home() {
                                         <span className="line-clamp-2 min-w-0 flex-1 whitespace-pre-wrap break-words">{act.accomplishment || 'Tap to add accomplishment'}</span>
                                         <Maximize2 size={15} className="mt-0.5 shrink-0 text-cyan-300" aria-hidden="true" />
                                       </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => void generateDailyJournalAccomplishment(weekIdx, dayIdx)}
-                                        disabled={Boolean(aiGenerating) || !getDailyJournalPhoto(week, dayIdx, form.appendices.dailyJournalLayout)}
-                                        title={getDailyJournalPhoto(week, dayIdx, form.appendices.dailyJournalLayout) ? 'Generate an accomplishment from this day’s photo' : 'Attach a photo to this day first'}
-                                        className="mt-2 inline-flex min-h-9 w-full items-center justify-center gap-2 rounded-lg border border-violet-400/30 bg-violet-500/10 px-2.5 py-2 text-xs font-semibold text-violet-200 transition hover:bg-violet-500/20 disabled:cursor-not-allowed disabled:opacity-50"
-                                      >
-                                        <Sparkles size={14} aria-hidden="true" />
-                                        {aiGenerating === `journal-${weekIdx}-${dayIdx}` ? 'Generating...' : 'Generate with AI'}
-                                      </button>
-                                      {!getDailyJournalPhoto(week, dayIdx, form.appendices.dailyJournalLayout) && (
-                                        <p className="mt-1 text-[10px] text-slate-500">Attach a photo for this day first.</p>
-                                      )}
-                                      {dailyJournalGenerationError?.weekIndex === weekIdx
-                                        && dailyJournalGenerationError.dayIndex === dayIdx && (
-                                          <p role="alert" className="mt-1 text-xs text-rose-300">{dailyJournalGenerationError.message}</p>
-                                        )}
+                                      <p className="mt-1 text-[10px] text-slate-500">
+                                        {getDailyJournalPhoto(week, dayIdx, form.appendices.dailyJournalLayout)
+                                          ? 'Photo available for AI drafting.'
+                                          : 'Attach a photo to generate with AI.'}
+                                      </p>
                                     </div>
 
                                     <div className="border-b border-slate-800 p-3 sm:border-b-0 sm:border-r">
@@ -4003,23 +4066,11 @@ export default function Home() {
                                     <span className="line-clamp-2 min-w-0 flex-1 whitespace-pre-wrap break-words">{act.accomplishment || 'Tap to add accomplishment'}</span>
                                     <Maximize2 size={15} className="mt-0.5 shrink-0 text-cyan-300" aria-hidden="true" />
                                   </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => void generateDailyJournalAccomplishment(weekIdx, dayIdx)}
-                                    disabled={Boolean(aiGenerating) || !getDailyJournalPhoto(week, dayIdx, form.appendices.dailyJournalLayout)}
-                                    title={getDailyJournalPhoto(week, dayIdx, form.appendices.dailyJournalLayout) ? 'Generate an accomplishment from this day’s photo' : 'Attach a photo to this day first'}
-                                    className="mt-2 inline-flex min-h-9 w-full items-center justify-center gap-2 rounded-lg border border-violet-400/30 bg-violet-500/10 px-2.5 py-2 text-xs font-semibold text-violet-200 transition hover:bg-violet-500/20 disabled:cursor-not-allowed disabled:opacity-50"
-                                  >
-                                    <Sparkles size={14} aria-hidden="true" />
-                                    {aiGenerating === `journal-${weekIdx}-${dayIdx}` ? 'Generating...' : 'Generate with AI'}
-                                  </button>
-                                  {!getDailyJournalPhoto(week, dayIdx, form.appendices.dailyJournalLayout) && (
-                                    <p className="mt-1 text-[10px] text-slate-500">Attach a photo for this day first.</p>
-                                  )}
-                                  {dailyJournalGenerationError?.weekIndex === weekIdx
-                                    && dailyJournalGenerationError.dayIndex === dayIdx && (
-                                      <p role="alert" className="mt-1 text-xs text-rose-300">{dailyJournalGenerationError.message}</p>
-                                    )}
+                                  <p className="mt-1 text-[10px] text-slate-500">
+                                    {getDailyJournalPhoto(week, dayIdx, form.appendices.dailyJournalLayout)
+                                      ? 'Photo available for AI drafting.'
+                                      : 'Attach a photo to generate with AI.'}
+                                  </p>
                                 </div>
                                 <div className="col-span-1">
                                   <label className="text-[9px] sm:text-xs text-slate-400 font-semibold uppercase tracking-wider">Hrs</label>
