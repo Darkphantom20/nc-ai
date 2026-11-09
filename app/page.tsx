@@ -1475,7 +1475,6 @@ export default function Home() {
   const [showAiDraftReview, setShowAiDraftReview] = useState(false);
   const [status, setStatus] = useState('Draft ready');
   const [aiGenerating, setAiGenerating] = useState('');
-  const [monthlyJournalAiErrors, setMonthlyJournalAiErrors] = useState<Record<string, string>>({});
   
   // Tour State
   const [runTour, setRunTour] = useState(false);
@@ -2505,25 +2504,18 @@ export default function Home() {
     monthKey: string,
     monthLabel: string,
     field: 'activitiesPerformed' | 'learningExperience',
-  ) => {
+    options: AIGenerationOptions,
+  ): Promise<string> => {
     const generationKey = `monthly-${monthKey}-${field}`;
-    const errorKey = `${monthKey}-${field}`;
     const photos = form.appendices.dailyJournalMonthlySummaries[monthKey]?.photos || [];
     if (!photos.length) {
-      setMonthlyJournalAiErrors((previous) => ({
-        ...previous,
-        [errorKey]: 'Add at least one photo to this month before generating.',
-      }));
-      return;
+      throw new Error('Add at least one photo to this month before generating.');
     }
-    if (aiGenerating) return;
+    if (aiGenerating) {
+      throw new Error('Another AI generation is already in progress. Wait for it to finish, then try again.');
+    }
 
     setAiGenerating(generationKey);
-    setMonthlyJournalAiErrors((previous) => {
-      const next = { ...previous };
-      delete next[errorKey];
-      return next;
-    });
     setStatus(`Generating ${field === 'activitiesPerformed' ? 'monthly activities' : 'monthly learning'} from photos...`);
 
     try {
@@ -2535,11 +2527,12 @@ export default function Home() {
             ? 'Monthly Journal Activities Performed'
             : 'Monthly Journal Learning Experience',
           imageData: photos.map((photo) => photo.base64),
+          focus: aiText(options.focus, 2000),
           instructions: field === 'activitiesPerformed'
             ? `Write one concise monthly Activities Performed paragraph based only on what is clearly visible in this month's uploaded photos (${monthLabel}). Describe observable activities without claiming the student personally performed them, or inventing dates, duties, results, or context.`
             : `Write one concise monthly Learning / Experience paragraph based only on clear learning evidence visible in this month's uploaded photos (${monthLabel}). Do not infer the student's feelings, skills, lessons, or personal growth. If personal learning is not visible, briefly ask the user to add their reflection instead of guessing.`,
-          outputUnit: 'paragraphs',
-          outputCount: 1,
+          outputUnit: options.unit,
+          outputCount: options.count,
         }),
       });
       const result: unknown = await response.json().catch(() => null);
@@ -2553,12 +2546,12 @@ export default function Home() {
         throw new Error('The AI service returned no text. Please try again.');
       }
 
-      updateMonthlyJournalSummary(monthKey, field, result.text.trim());
       setStatus(`${field === 'activitiesPerformed' ? 'Activities Performed' : 'Learning / Experience'} drafted. Review and edit the text.`);
+      return result.text.trim();
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Could not generate the monthly journal text.';
-      setMonthlyJournalAiErrors((previous) => ({ ...previous, [errorKey]: message }));
       setStatus(message);
+      throw new Error(message);
     } finally {
       setAiGenerating('');
     }
@@ -4050,58 +4043,32 @@ export default function Home() {
                             </div>
                           </div>
 
-                          <label className="block text-sm font-semibold text-slate-200">
-                            <span className="flex flex-wrap items-center justify-between gap-2">
-                              <span>Activities Performed</span>
-                              <button
-                                type="button"
-                                onClick={() => void generateMonthlyJournalField(month.key, month.label, 'activitiesPerformed')}
-                                disabled={Boolean(aiGenerating) || !(form.appendices.dailyJournalMonthlySummaries[month.key]?.photos?.length)}
-                                className="inline-flex min-h-9 items-center justify-center gap-2 rounded-lg border border-violet-400/30 bg-violet-500/10 px-3 py-1.5 text-xs font-semibold text-violet-200 transition hover:bg-violet-500/20 disabled:cursor-not-allowed disabled:opacity-50"
-                              >
-                                <Sparkles size={14} aria-hidden="true" />
-                                {aiGenerating === `monthly-${month.key}-activitiesPerformed` ? 'Generating...' : 'Generate with AI'}
-                              </button>
-                            </span>
-                            {monthlyJournalAiErrors[`${month.key}-activitiesPerformed`] && (
-                              <span role="alert" className="mt-2 block text-xs font-normal text-rose-300">
-                                {monthlyJournalAiErrors[`${month.key}-activitiesPerformed`]}
-                              </span>
-                            )}
-                            <textarea
-                              rows={4}
+                          <div>
+                            <label className="mb-1.5 block text-sm font-semibold text-slate-200">Activities Performed</label>
+                            <ExpandableTextarea
+                              title={`${month.label} · Activities Performed`}
                               value={month.activitiesPerformed}
-                              onChange={(event) => updateMonthlyJournalSummary(month.key, 'activitiesPerformed', event.target.value)}
+                              onChange={(value) => updateMonthlyJournalSummary(month.key, 'activitiesPerformed', value)}
                               placeholder="Summarize the activities performed during this month."
-                              className={fieldClass}
+                              onGenerate={(options) => generateMonthlyJournalField(month.key, month.label, 'activitiesPerformed', options)}
+                              generating={aiGenerating === `monthly-${month.key}-activitiesPerformed`}
+                              generateDisabled={!(form.appendices.dailyJournalMonthlySummaries[month.key]?.photos?.length)}
+                              generateDisabledMessage="Add at least one photo to this month to generate from its images."
                             />
-                          </label>
-                          <label className="block text-sm font-semibold text-slate-200">
-                            <span className="flex flex-wrap items-center justify-between gap-2">
-                              <span>Learning / Experience</span>
-                              <button
-                                type="button"
-                                onClick={() => void generateMonthlyJournalField(month.key, month.label, 'learningExperience')}
-                                disabled={Boolean(aiGenerating) || !(form.appendices.dailyJournalMonthlySummaries[month.key]?.photos?.length)}
-                                className="inline-flex min-h-9 items-center justify-center gap-2 rounded-lg border border-violet-400/30 bg-violet-500/10 px-3 py-1.5 text-xs font-semibold text-violet-200 transition hover:bg-violet-500/20 disabled:cursor-not-allowed disabled:opacity-50"
-                              >
-                                <Sparkles size={14} aria-hidden="true" />
-                                {aiGenerating === `monthly-${month.key}-learningExperience` ? 'Generating...' : 'Generate with AI'}
-                              </button>
-                            </span>
-                            {monthlyJournalAiErrors[`${month.key}-learningExperience`] && (
-                              <span role="alert" className="mt-2 block text-xs font-normal text-rose-300">
-                                {monthlyJournalAiErrors[`${month.key}-learningExperience`]}
-                              </span>
-                            )}
-                            <textarea
-                              rows={3}
+                          </div>
+                          <div>
+                            <label className="mb-1.5 block text-sm font-semibold text-slate-200">Learning / Experience</label>
+                            <ExpandableTextarea
+                              title={`${month.label} · Learning / Experience`}
                               value={month.learningExperience}
-                              onChange={(event) => updateMonthlyJournalSummary(month.key, 'learningExperience', event.target.value)}
+                              onChange={(value) => updateMonthlyJournalSummary(month.key, 'learningExperience', value)}
                               placeholder="Describe what you learned or experienced this month."
-                              className={fieldClass}
+                              onGenerate={(options) => generateMonthlyJournalField(month.key, month.label, 'learningExperience', options)}
+                              generating={aiGenerating === `monthly-${month.key}-learningExperience`}
+                              generateDisabled={!(form.appendices.dailyJournalMonthlySummaries[month.key]?.photos?.length)}
+                              generateDisabledMessage="Add at least one photo to this month to generate from its images."
                             />
-                          </label>
+                          </div>
                           <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3 sm:p-4">
                             <label className="block text-xs font-semibold text-slate-300">
                               Monthly Photo Documentation (Max 4)
@@ -4702,6 +4669,8 @@ function ExpandableTextarea({
   className = fieldClass,
   onGenerate,
   generating = false,
+  generateDisabled = false,
+  generateDisabledMessage = '',
 }: {
   title: string;
   value: string;
@@ -4711,6 +4680,8 @@ function ExpandableTextarea({
   className?: string;
   onGenerate?: (options: AIGenerationOptions) => Promise<string | null> | void;
   generating?: boolean;
+  generateDisabled?: boolean;
+  generateDisabledMessage?: string;
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const [draft, setDraft] = useState(value);
@@ -4786,6 +4757,9 @@ function ExpandableTextarea({
             <footer className="space-y-3 border-t border-slate-800 bg-slate-950 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 sm:px-6 sm:pb-4">
               {onGenerate && (
                 <div className="space-y-3">
+                  {generateDisabled && generateDisabledMessage && (
+                    <p className="text-xs text-slate-400">{generateDisabledMessage}</p>
+                  )}
                   <label htmlFor={`generation-topic-${title}`} className="mb-1.5 block text-[10px] font-bold uppercase tracking-[0.16em] text-violet-300">
                     Optional generation focus or main points
                   </label>
@@ -4848,7 +4822,7 @@ function ExpandableTextarea({
                         setGenerationError(error instanceof Error ? error.message : 'Could not generate text. Please try again.');
                       }
                     }}
-                    disabled={generating}
+                    disabled={generating || generateDisabled}
                     className="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl border border-violet-400/30 bg-violet-500/10 px-3 text-sm font-semibold text-violet-200 transition hover:bg-violet-500/20 disabled:cursor-wait disabled:opacity-60 sm:flex-none sm:min-w-36"
                   >
                     <Sparkles size={15} aria-hidden="true" />

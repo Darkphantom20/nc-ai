@@ -302,7 +302,7 @@ export async function POST(request: Request) {
         ? 'This request is only about the second OJT placement. Use only its supplied organization details, related second-placement fields, current text, and user focus. Never use details from the first placement or its journal as evidence for this placement.'
         : '',
       monthlyImageJournalRequest
-        ? 'This monthly journal request must use the attached photos as its only factual source. Ignore any current text, user focus, or source details if supplied.'
+        ? 'This monthly journal request must use the attached photos as its only factual source. The user focus may guide which visible details to emphasize or the writing style, but it is not evidence and must not add facts that cannot be seen in the photos.'
         : '',
       completedActionRequest
         ? schoolPlacementRequest
