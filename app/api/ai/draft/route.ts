@@ -1,4 +1,8 @@
-import { DEFAULT_CLOUDFLARE_MODEL, requestCloudflareChatCompletion } from '../../../../lib/cloudflare-ai';
+import {
+  DEFAULT_CLOUDFLARE_MODEL,
+  getCloudflareAccounts,
+  requestCloudflareChatCompletion,
+} from '../../../../lib/cloudflare-ai';
 
 export const runtime = 'nodejs';
 
@@ -248,6 +252,11 @@ function parseJsonContent(content: string): unknown {
 }
 
 export async function POST(request: Request) {
+  const cloudflareConfiguration = getCloudflareAccounts();
+  if (cloudflareConfiguration.error) {
+    return Response.json({ error: cloudflareConfiguration.error }, { status: 500 });
+  }
+  const cloudflareAccounts = cloudflareConfiguration.accounts;
   let payload: unknown;
   try {
     payload = await request.json();
@@ -279,11 +288,11 @@ export async function POST(request: Request) {
         ? process.env.GEMINI_API_KEY
         : provider === 'deepseek'
           ? process.env.DEEPSEEK_API_KEY
-          : process.env.CLOUDFLARE_API_TOKEN && process.env.CLOUDFLARE_ACCOUNT_ID
+          : cloudflareAccounts.length > 0
   ));
   if (availableProviders.length === 0) {
     return Response.json({
-      error: 'Configure GROQ_API_KEY, GEMINI_API_KEY, DEEPSEEK_API_KEY, or both CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID on the server to enable AI drafting.',
+      error: 'Configure GROQ_API_KEY, GEMINI_API_KEY, DEEPSEEK_API_KEY, or a Cloudflare account ID and API token pair on the server to enable AI drafting.',
     }, { status: 503 });
   }
 
@@ -331,41 +340,48 @@ export async function POST(request: Request) {
   const providerErrors: string[] = [];
   let timedOut = false;
   for (const provider of availableProviders) {
-    try {
-      const apiKey = provider === 'groq'
+    const apiKey = provider === 'groq'
         ? process.env.GROQ_API_KEY
         : provider === 'gemini'
           ? process.env.GEMINI_API_KEY
           : provider === 'deepseek'
             ? process.env.DEEPSEEK_API_KEY
-            : process.env.CLOUDFLARE_API_TOKEN;
-      if (!apiKey) continue;
-      const content = provider === 'groq'
-        ? await requestGroq(prompt, apiKey)
-        : provider === 'gemini'
-          ? await requestGemini(prompt, apiKey)
-          : provider === 'deepseek'
-            ? await requestDeepSeek(prompt, apiKey)
-            : await requestCloudflare(prompt, apiKey, process.env.CLOUDFLARE_ACCOUNT_ID || '');
-      const generated: unknown = parseJsonContent(content);
-      if (!isRecord(generated)) throw new Error('The AI response was not a JSON object.');
+            : undefined;
+    const credentials = provider === 'cloudflare'
+      ? cloudflareAccounts
+      : apiKey
+        ? [{ apiToken: apiKey, accountId: '' }]
+        : [];
 
-      const report = parseGeneratedFields(generated.report);
-      if (!report) throw new Error('The AI response did not include all report fields.');
-      const result: { report: Record<FieldKey, string>; schoolPlacement?: Record<FieldKey, string> } = { report };
+    for (const credential of credentials) {
+      try {
+        const content = provider === 'groq'
+          ? await requestGroq(prompt, credential.apiToken)
+          : provider === 'gemini'
+            ? await requestGemini(prompt, credential.apiToken)
+            : provider === 'deepseek'
+              ? await requestDeepSeek(prompt, credential.apiToken)
+              : await requestCloudflare(prompt, credential.apiToken, credential.accountId);
+        const generated: unknown = parseJsonContent(content);
+        if (!isRecord(generated)) throw new Error('The AI response was not a JSON object.');
 
-      if (schoolPlacementEnabled) {
-        const schoolFields = parseGeneratedFields(generated.schoolPlacement);
-        if (!schoolFields) throw new Error('The AI response did not include all school placement fields.');
-        result.schoolPlacement = schoolFields;
+        const report = parseGeneratedFields(generated.report);
+        if (!report) throw new Error('The AI response did not include all report fields.');
+        const result: { report: Record<FieldKey, string>; schoolPlacement?: Record<FieldKey, string> } = { report };
+
+        if (schoolPlacementEnabled) {
+          const schoolFields = parseGeneratedFields(generated.schoolPlacement);
+          if (!schoolFields) throw new Error('The AI response did not include all school placement fields.');
+          result.schoolPlacement = schoolFields;
+        }
+
+        return Response.json(result);
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : 'Unknown provider error';
+        timedOut ||= error instanceof Error && error.name === 'TimeoutError';
+        providerErrors.push(`${provider}: ${reason}`);
+        console.error('AI draft provider failed', { provider, reason });
       }
-
-      return Response.json(result);
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : 'Unknown provider error';
-      timedOut ||= error instanceof Error && error.name === 'TimeoutError';
-      providerErrors.push(`${provider}: ${reason}`);
-      console.error('AI draft provider failed', { provider, reason });
     }
   }
 

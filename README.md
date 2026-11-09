@@ -20,7 +20,7 @@ Use **Draft with AI** to create editable text for the narrative report fields. D
 
 Use **Generate with AI** in an individual section editor to create or revise that section. Add an optional focus, choose whether the result should contain 1–10 sentences or paragraphs, generate once, review the result in the editor, and choose **Save** to apply it. Generation uses the weekly journal activities and generated weekly narratives as its primary source for student-experience content, with related user-edited report fields as supporting context. For case analysis, it uses documented issues when available or clearly labels a task-grounded inference as a potential challenge rather than a confirmed event. Unchanged sample text, attachments, and unrelated default data are excluded. Full-report drafting uses the same journal context. Official organization statements still require explicit source details; journal entries alone are not treated as proof of an organization's mission, vision, or services. The AI is instructed to follow the user's actual field and duties rather than assuming an IT placement, and to ask for details instead of guessing. Always review AI-generated text for accuracy before including it in a final report.
 
-In the Daily Journal, open a day's **Accomplishment** editor to generate one from the user's task details and that day's documentation photo. Add any extra context before generating; photos are visual context and are not treated as proof that an action or outcome occurred. Photo-based accomplishment generation requires `GEMINI_API_KEY` or `GEMINI_API_KEYS`, because it uses Gemini's image input rather than falling back to a text-only provider. Review the suggested accomplishment and save it to apply.
+In the Daily Journal, use **Generate with AI** under an accomplishment to draft that day's entry from its attached photo and any existing accomplishment text. The generated draft opens in the editor for review; select **Save** to apply it. Photo-based generation uses Gemini or Cloudflare Workers AI's vision-capable Llama 4 Scout model, and sends the selected journal photo to that configured provider. It does not fall back to text-only providers for photo requests. Add a photo to the day and configure `GEMINI_API_KEY` or the Cloudflare account credentials to enable this feature.
 
 When **I continued my OJT in another place** is enabled, the second-placement fields from Introduction through Reflections also provide **Generate with AI**. Their context is isolated to details entered in the second placement and does not reuse the first placement's journal or report fields. The report retains one shared Acknowledgement section.
 
@@ -61,7 +61,7 @@ For Vercel, add `GROQ_API_KEY` under **Project Settings → Environment Variable
 
 ## Gemini backup text generation
 
-Set `GEMINI_API_KEY` as another server-side environment variable. When a provider is unavailable, rate-limited, or returns unusable text, the API automatically retries with other configured providers. Gemini is also required for the photo-based daily-accomplishment feature.
+Set `GEMINI_API_KEY` as another server-side environment variable. When a provider is unavailable, rate-limited, or returns unusable text, the API automatically retries with other configured providers.
 
 ```powershell
 $env:GEMINI_API_KEY="your_gemini_api_key"
@@ -78,7 +78,7 @@ For Vercel, add `DEEPSEEK_API_KEY` under **Project Settings → Environment Vari
 
 ## Cloudflare Workers AI (Llama)
 
-Create a Cloudflare API token with Workers AI Read and Edit permissions and find your account ID in the Cloudflare dashboard. Add both as server-only environment variables:
+Create a Cloudflare API token with Workers AI permissions and find the matching account ID in the Cloudflare dashboard. Add the account ID and token as server-only environment variables:
 
 ```env
 CLOUDFLARE_ACCOUNT_ID=your-cloudflare-account-id
@@ -92,17 +92,20 @@ Both AI routes use Cloudflare's chat-completions API. `AI_PROVIDER=cloudflare` p
 
 ## Multiple API keys and automatic fallback
 
-To cycle through several keys for Groq, Gemini, or section generation with DeepSeek and Cloudflare, add comma-, semicolon-, or newline-separated keys to `GROQ_API_KEYS`, `GEMINI_API_KEYS`, `DEEPSEEK_API_KEYS`, or `CLOUDFLARE_API_TOKENS`. The existing singular variables also remain supported.
+To use multiple Cloudflare accounts, set `CLOUDFLARE_ACCOUNT_IDS` and `CLOUDFLARE_API_TOKENS` with matching comma-, semicolon-, or newline-separated entries. Each account ID is paired with the token at the same position. Both section generation and full-report drafting try the configured pairs in order when one account fails. The singular `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` settings remain supported, including one account ID with multiple tokens.
+
+For Groq, Gemini, and DeepSeek, add comma-, semicolon-, or newline-separated keys to `GROQ_API_KEYS`, `GEMINI_API_KEYS`, or `DEEPSEEK_API_KEYS`. Existing singular key settings remain supported.
 
 ```powershell
 $env:GROQ_API_KEYS="groq_key_1,groq_key_2,groq_key_3"
 $env:GEMINI_API_KEYS="gemini_key_1,gemini_key_2"
 $env:DEEPSEEK_API_KEYS="deepseek_key_1,deepseek_key_2"
+$env:CLOUDFLARE_ACCOUNT_IDS="cloudflare_account_1,cloudflare_account_2"
 $env:CLOUDFLARE_API_TOKENS="cloudflare_token_1,cloudflare_token_2"
 npm run dev
 ```
 
-The section-generation API rotates provider priority when `AI_PROVIDER` is unset, tries each available key once, and puts a key temporarily on cooldown when a provider reports a rate limit. Provider timeouts, account balance/credential errors, and output-validation failures are reported separately; a rate limit in one provider does not mean every provider is busy. Generation checks requested sentence/paragraph counts and constrains action fields to documented steps, but generated content should still be reviewed against the source journal. Full-report drafting uses one key per configured provider; plural key settings are currently supported only for section generation.
+The section-generation API rotates provider priority when `AI_PROVIDER` is unset, tries each available credential once, and puts a credential temporarily on cooldown when a provider reports a rate limit. Provider timeouts, account balance/credential errors, and output-validation failures are reported separately; a rate limit in one provider does not mean every provider is busy. Generation checks requested sentence/paragraph counts and constrains action fields to documented steps, but generated content should still be reviewed against the source journal.
 
 ## Notes
 
