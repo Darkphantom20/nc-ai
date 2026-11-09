@@ -309,6 +309,9 @@ export async function POST(request: Request) {
       reflectionRequest
         ? 'This is a Reflections section. When user focus is supplied, treat it as the primary account of the reflection and the specific points to address. The existing draft and report context are secondary; use them only when directly relevant to the focus, and do not let unrelated journal activities redirect the reflection. Preserve the user’s meaning and do not invent feelings, skills, growth, course connections, or career goals.'
         : '',
+      acknowledgementRequest
+        ? 'For this Acknowledgement, treat the user focus as the primary guide for whom the student wants to acknowledge and what contributions to mention. The existing draft and report context are secondary and may only clarify details that directly match the focus. Never invent a recipient or contribution; if the focus and relevant supplied details do not identify them, ask the user to provide them instead of writing unsupported thanks.'
+        : '',
       monthlyImageJournalRequest
         ? 'For this monthly journal request, use both the attached photos and the user-provided focus as factual sources. Treat the focus as the user’s account of the activities or experience, even when the action is not visible in a photo. Incorporate the relevant focus details rather than replacing them with a generic description of the images. Use photos to add or clarify visible context, and do not invent facts beyond the focus and photos.'
         : '',
@@ -320,7 +323,9 @@ export async function POST(request: Request) {
           ? 'Use the user focus first. Use the current field draft and related weekly journal only for details that directly match the focus; exclude unrelated tasks and context.'
           : reflectionRequest
             ? 'Use the user focus first. Treat the current reflection draft and report details as supporting context only when they directly match the focus. Do not add unrelated activities or replace the requested reflection with a summary of the journal.'
-          : monthlyImageJournalRequest
+            : acknowledgementRequest
+              ? 'Use the acknowledgement focus first. Treat the existing draft and report details as secondary; include only recipients and contributions stated in or directly supporting that focus. Do not preserve unrelated generic acknowledgement claims.'
+            : monthlyImageJournalRequest
           ? 'Use only facts directly supported by the attached photos or explicitly provided in the user focus; do not rely on outside knowledge or assumptions.'
           : schoolPlacementRequest
           ? 'Use only the current second-placement section text, optional user focus, and supplied second-placement details as factual evidence. Use related fields only when directly relevant; do not use or assume facts from the first placement.'
@@ -372,14 +377,18 @@ export async function POST(request: Request) {
           ? `Current field draft (secondary context only; do not preserve details that conflict with or fall outside the user's focus): ${currentText}`
           : reflectionRequest
             ? `Current reflection draft (secondary context only; keep only details that support the user's focus): ${currentText}`
-            : `Current text to improve: ${currentText}`
+            : acknowledgementRequest
+              ? `Current acknowledgement draft (secondary context only; retain only recipients and contributions relevant to the user's focus): ${currentText}`
+              : `Current text to improve: ${currentText}`
         : '',
       focus
         ? taskDutyRequest
           ? `PRIMARY USER FOCUS — build this section around these requested tasks and details. Do not let the current draft or unrelated journal entries override or dilute it: ${focus}`
           : reflectionRequest
             ? `PRIMARY REFLECTION FOCUS — follow these points and the user's account first. Include relevant details from other context only if they support this focus: ${focus}`
-            : `Optional user-provided focus and factual details: ${focus}`
+            : acknowledgementRequest
+              ? `PRIMARY ACKNOWLEDGEMENT FOCUS — follow the user's requested recipients, contributions, and emphasis first. Do not add thanks or claims for anyone not identified here or in directly supporting source details: ${focus}`
+              : `Optional user-provided focus and factual details: ${focus}`
         : '',
     ].filter(Boolean).join('\n\n');
 

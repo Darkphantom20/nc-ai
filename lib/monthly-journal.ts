@@ -35,13 +35,13 @@ export type MonthlyJournalGroup = {
   learningExperience: string;
 };
 
-const MONTHS = [
+export const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December',
 ];
 
 function getActivityMonth(date: string): { monthIndex: number; year: string } | null {
-  const namedMonthIndex = MONTHS.findIndex((month) => (
+  const namedMonthIndex = MONTH_NAMES.findIndex((month) => (
     new RegExp(`\\b${month}\\b|\\b${month.slice(0, 3)}\\b`, 'i').test(date)
   ));
   const year = date.match(/\b(?:19|20)\d{2}\b/)?.[0] || '';
@@ -78,7 +78,7 @@ export function getMonthlyJournalGroups(
       if (month && !month.year) month.year = inferredYear;
       const key = month ? `${month.year || 'unspecified'}-${month.monthIndex + 1}` : 'month-not-set';
       const label = month
-        ? `${MONTHS[month.monthIndex].toUpperCase()}${month.year ? ` ${month.year}` : ''}`
+        ? `${MONTH_NAMES[month.monthIndex].toUpperCase()}${month.year ? ` ${month.year}` : ''}`
         : 'MONTH NOT SET';
       const group = groups.get(key) || {
         key,
@@ -99,10 +99,10 @@ export function getMonthlyJournalGroups(
     if (groups.has(key)) return;
     const keyMatch = key.match(/^(\d{4}|unspecified)-(\d{1,2})$/);
     const monthIndex = keyMatch ? Number(keyMatch[2]) - 1 : -1;
-    if (monthIndex < 0 || monthIndex >= MONTHS.length) return;
+    if (monthIndex < 0 || monthIndex >= MONTH_NAMES.length) return;
     groups.set(key, {
       key,
-      label: `${MONTHS[monthIndex].toUpperCase()}${keyMatch?.[1] === 'unspecified' ? '' : ` ${keyMatch?.[1]}`}`,
+      label: `${MONTH_NAMES[monthIndex].toUpperCase()}${keyMatch?.[1] === 'unspecified' ? '' : ` ${keyMatch?.[1]}`}`,
       activities: [],
       periodCovered: '',
       actualDutyDays: '',
@@ -111,6 +111,54 @@ export function getMonthlyJournalGroups(
       learningExperience: '',
     });
   });
+
+  const datedMonths = Array.from(groups.keys())
+    .map((key) => {
+      const match = key.match(/^(\d{4}|unspecified)-(\d{1,2})$/);
+      if (!match) return null;
+      const year = match[1];
+      const month = Number(match[2]);
+      const ordinal = year === 'unspecified' ? month - 1 : Number(year) * 12 + month - 1;
+      return { year, month, ordinal };
+    })
+    .filter((month): month is { year: string; month: number; ordinal: number } => month !== null)
+    .sort((left, right) => (
+      left.year === right.year
+        ? left.ordinal - right.ordinal
+        : left.year === 'unspecified'
+          ? -1
+          : right.year === 'unspecified'
+            ? 1
+            : Number(left.year) - Number(right.year)
+    ));
+
+  for (let index = 1; index < datedMonths.length; index += 1) {
+    const previous = datedMonths[index - 1];
+    const current = datedMonths[index];
+    if ((previous.year === 'unspecified') !== (current.year === 'unspecified')) continue;
+    const gap = current.ordinal - previous.ordinal;
+    if (gap < 2 || gap > 12) continue;
+
+    for (let offset = 1; offset < gap; offset += 1) {
+      const ordinal = previous.ordinal + offset;
+      const year = previous.year === 'unspecified'
+        ? 'unspecified'
+        : String(Math.floor(ordinal / 12));
+      const month = (ordinal % 12) + 1;
+      const key = `${year}-${month}`;
+      if (groups.has(key)) continue;
+      groups.set(key, {
+        key,
+        label: `${MONTH_NAMES[month - 1].toUpperCase()}${year === 'unspecified' ? '' : ` ${year}`}`,
+        activities: [],
+        periodCovered: '',
+        actualDutyDays: '',
+        totalHoursRendered: '',
+        activitiesPerformed: '',
+        learningExperience: '',
+      });
+    }
+  }
 
   return Array.from(groups.values())
     .sort((left, right) => left.key === 'month-not-set'

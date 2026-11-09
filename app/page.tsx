@@ -8,6 +8,7 @@ import { HelpCircle, ImagePlus, ZoomIn, ZoomOut, Maximize2, X, Eye, FileText, Sp
 import {
   getMonthlyJournalGroups,
   getNextMonthlyJournalKey,
+  MONTH_NAMES,
   type MonthlyJournalSummary,
 } from '../lib/monthly-journal';
 import guideScene from '../05c9cb1a-009e-4c61-ab2f-30d279b5a02c.jpg';
@@ -249,6 +250,59 @@ function normalizeDailyJournalDays(journal: NarrativeJournalWeek[]): NarrativeJo
       day: `Day ${dayNumber++}`
     }))
   }));
+}
+
+function moveJournalDateToMonth(
+  date: string,
+  oldMonthIndex: number,
+  targetMonthIndex: number,
+  targetYear: number | null,
+): string | null {
+  const oldMonth = MONTH_NAMES[oldMonthIndex];
+  const targetMonth = MONTH_NAMES[targetMonthIndex];
+  const monthPattern = new RegExp(`\\b(?:${oldMonth}|${oldMonth.slice(0, 3)})\\b\\.?`, 'gi');
+  if (monthPattern.test(date)) {
+    const updatedDate = date.replace(monthPattern, targetMonth);
+    if (targetYear === null) return updatedDate;
+    if (/\b(?:19|20)\d{2}\b/.test(updatedDate)) {
+      return updatedDate.replace(/\b(?:19|20)\d{2}\b/, String(targetYear));
+    }
+    return `${updatedDate}, ${targetYear}`;
+  }
+
+  const isoDate = date.match(/^(\s*)(\d{4})([-/])(\d{1,2})([-/])(\d{1,2})(.*)$/);
+  if (isoDate && Number(isoDate[4]) === oldMonthIndex + 1) {
+    const month = String(targetMonthIndex + 1).padStart(isoDate[4].length, '0');
+    return `${isoDate[1]}${targetYear ?? isoDate[2]}${isoDate[3]}${month}${isoDate[5]}${isoDate[6]}${isoDate[7]}`;
+  }
+
+  const numericDate = date.match(/^(\s*)(\d{1,2})([-/])(\d{1,2})(?:([-/])(\d{2,4}))?(.*)$/);
+  if (numericDate && Number(numericDate[2]) === oldMonthIndex + 1) {
+    const month = String(targetMonthIndex + 1).padStart(numericDate[2].length, '0');
+    const year = numericDate[6]
+      ? `${numericDate[5]}${targetYear ?? numericDate[6]}`
+      : targetYear === null
+        ? ''
+        : `${numericDate[3]}${targetYear}`;
+    return `${numericDate[1]}${month}${numericDate[3]}${numericDate[4]}${year}${numericDate[7]}`;
+  }
+
+  return null;
+}
+
+function moveMonthText(value: string, oldMonthIndex: number, targetMonthIndex: number, targetYear: number | null): string {
+  const oldMonth = MONTH_NAMES[oldMonthIndex];
+  const targetMonth = MONTH_NAMES[targetMonthIndex];
+  const monthPattern = new RegExp(`\\b(?:${oldMonth}|${oldMonth.slice(0, 3)})\\b\\.?`, 'gi');
+  const namedMonthText = value.replace(monthPattern, targetMonth);
+  const oldMonthNumber = oldMonthIndex + 1;
+  const targetMonthNumber = targetMonthIndex + 1;
+  const numericMonthPattern = new RegExp(`(^|[^\\d])0?${oldMonthNumber}([-/])(?=\\d)`, 'g');
+  const updatedText = namedMonthText
+    .replace(numericMonthPattern, `$1${targetMonthNumber}$2`)
+  return targetYear === null
+    ? updatedText
+    : updatedText.replace(/\b(?:19|20)\d{2}\b/, String(targetYear));
 }
 
 type NarrativeForm = Omit<typeof defaultForm, 'appendices'> & {
@@ -2145,6 +2199,141 @@ export default function Home() {
     }));
   };
 
+  const moveMonthlyJournalMonth = (monthKey: string, value: string) => {
+    const targetMatch = value.match(/^(\d{4}|unspecified)-(\d{1,2})$/);
+    const sourceMatch = monthKey.match(/^(\d{4}|unspecified)-(\d{1,2})$/);
+    if (!targetMatch || !sourceMatch) return;
+
+    const targetYear = targetMatch[1] === 'unspecified' ? null : Number(targetMatch[1]);
+    const targetMonthIndex = Number(targetMatch[2]) - 1;
+    const oldMonthIndex = Number(sourceMatch[2]) - 1;
+    if (targetMonthIndex < 0 || targetMonthIndex >= MONTH_NAMES.length) return;
+
+    const targetKey = `${targetMatch[1]}-${targetMonthIndex + 1}`;
+    if (targetKey === monthKey) return;
+
+    const groups = getMonthlyJournalGroups(
+      form.appendices.dailyJournal,
+      form.appendices.dailyJournalMonthlySummaries,
+    );
+    const sourceGroup = groups.find((group) => group.key === monthKey);
+    if (!sourceGroup) return;
+
+    const targetGroup = groups.find((group) => group.key === targetKey);
+    const targetHasSummary = Object.prototype.hasOwnProperty.call(
+      form.appendices.dailyJournalMonthlySummaries,
+      targetKey,
+    );
+    if (targetGroup?.activities.length || targetHasSummary) {
+      setStatus('That month already has journal data. Choose an empty month to avoid merging or overwriting entries.');
+      return;
+    }
+
+    const dateUpdates = new Map<string, string>();
+    for (const { weekIndex, dayIndex, activity } of sourceGroup.activities) {
+      const updatedDate = moveJournalDateToMonth(
+        activity.date,
+        oldMonthIndex,
+        targetMonthIndex,
+        targetYear,
+      );
+      if (!updatedDate) {
+        setStatus(`Could not move “${activity.date}” because its date format was not recognized. Edit that date in the journal first.`);
+        return;
+      }
+      dateUpdates.set(`${weekIndex}:${dayIndex}`, updatedDate);
+    }
+
+    setForm((previous) => {
+      const summaries = { ...previous.appendices.dailyJournalMonthlySummaries };
+      const sourceSummary = summaries[monthKey] || {};
+      const movedSummary = { ...sourceSummary };
+      if (movedSummary.periodCovered) {
+        movedSummary.periodCovered = moveMonthText(
+          movedSummary.periodCovered,
+          oldMonthIndex,
+          targetMonthIndex,
+          targetYear,
+        );
+      }
+      delete summaries[monthKey];
+      summaries[targetKey] = movedSummary;
+
+      return {
+        ...previous,
+        appendices: {
+          ...previous.appendices,
+          dailyJournal: previous.appendices.dailyJournal.map((week, weekIndex) => ({
+            ...week,
+            activities: week.activities.map((activity, dayIndex) => ({
+              ...activity,
+              date: dateUpdates.get(`${weekIndex}:${dayIndex}`) ?? activity.date,
+            })),
+          })),
+          dailyJournalMonthlySummaries: summaries,
+        },
+      };
+    });
+    setStatus(`Moved ${sourceGroup.label} to ${MONTH_NAMES[targetMonthIndex]}${targetYear ? ` ${targetYear}` : ''}.`);
+  };
+
+  const removeMonthlyJournalMonth = (monthKey: string) => {
+    const groups = getMonthlyJournalGroups(
+      form.appendices.dailyJournal,
+      form.appendices.dailyJournalMonthlySummaries,
+    );
+    const month = groups.find((group) => group.key === monthKey);
+    if (!month) return;
+
+    const hasSummary = Object.prototype.hasOwnProperty.call(
+      form.appendices.dailyJournalMonthlySummaries,
+      monthKey,
+    );
+    if (!month.activities.length && !hasSummary) return;
+
+    const confirmation = month.activities.length
+      ? `Remove ${month.label} and its ${month.activities.length} dated journal entr${month.activities.length === 1 ? 'y' : 'ies'}? Matching daily photos and the monthly summary/photos will also be removed.`
+      : `Remove ${month.label} and its monthly summary and photos?`;
+    if (!window.confirm(confirmation)) return;
+
+    const removedDays = new Map<number, Set<number>>();
+    month.activities.forEach(({ weekIndex, dayIndex }) => {
+      const indices = removedDays.get(weekIndex) || new Set<number>();
+      indices.add(dayIndex);
+      removedDays.set(weekIndex, indices);
+    });
+
+    setForm((previous) => {
+      const summaries = { ...previous.appendices.dailyJournalMonthlySummaries };
+      delete summaries[monthKey];
+      return {
+        ...previous,
+        appendices: {
+          ...previous.appendices,
+          dailyJournal: normalizeDailyJournalDays(
+            previous.appendices.dailyJournal.map((week, weekIndex) => {
+              const indices = removedDays.get(weekIndex);
+              if (!indices?.size) return week;
+              const keepDay = (_: unknown, dayIndex: number) => !indices.has(dayIndex);
+              const activities = week.activities.filter(keepDay);
+              const keepPhoto = (_: JournalPhoto | null, photoIndex: number) => !indices.has(photoIndex);
+              return {
+                ...week,
+                activities,
+                totalHours: activities.reduce((total, activity) => total + (Number(activity.hours) || 0), 0),
+                images: week.images?.filter(keepPhoto),
+                currentLayoutImages: week.currentLayoutImages?.filter(keepPhoto),
+                reportLayoutImages: week.reportLayoutImages?.filter(keepPhoto),
+              };
+            }),
+          ),
+          dailyJournalMonthlySummaries: summaries,
+        },
+      };
+    });
+    setStatus(`Removed ${month.label} and its associated journal data.`);
+  };
+
   const handleDailyJournalDocxUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = '';
@@ -3692,7 +3881,7 @@ export default function Home() {
                     value={form.acknowledgement}
                     onChange={(value) => updateField('acknowledgement', value)}
                     rows={4}
-                    onGenerate={(topic) => generateFieldWithAI('acknowledgement', 'Acknowledgement', form.acknowledgement, 'Use related report details to align the acknowledgement with the student’s actual work. Do not invent recipients or claim gratitude, support, guidance, opportunity, growth, or learning unless the source explicitly says so. If no recipients are named, use neutral statements grounded only in supplied tasks and ask the user to add the names and contributions they want acknowledged.', topic)}
+                    onGenerate={(topic) => generateFieldWithAI('acknowledgement', 'Acknowledgement', form.acknowledgement, 'Treat the user focus as the primary guide for whom to acknowledge and what contributions to mention. Use existing acknowledgement and report details only when they directly support that focus. Do not invent recipients or claim gratitude, support, guidance, opportunity, growth, or learning unless the focus or relevant source details explicitly support them. If recipients or contributions are missing, ask the user to provide them.', topic)}
                     generating={aiGenerating === 'acknowledgement'}
                   />
                 </label>
@@ -4005,10 +4194,77 @@ export default function Home() {
                       {getMonthlyJournalGroups(
                         form.appendices.dailyJournal,
                         form.appendices.dailyJournalMonthlySummaries,
-                      ).map((month) => (
+                      ).map((month) => {
+                        const monthKeyMatch = month.key.match(/^(\d{4}|unspecified)-(\d{1,2})$/);
+                        const hasMonthlySummary = Object.prototype.hasOwnProperty.call(
+                          form.appendices.dailyJournalMonthlySummaries,
+                          month.key,
+                        );
+                        const canManageMonth = month.activities.length > 0 || hasMonthlySummary;
+                        const occupiedMonthKeys = new Set([
+                          ...getMonthlyJournalGroups(
+                            form.appendices.dailyJournal,
+                            form.appendices.dailyJournalMonthlySummaries,
+                          )
+                            .filter((group) => group.activities.length > 0)
+                            .map((group) => group.key),
+                          ...Object.keys(form.appendices.dailyJournalMonthlySummaries),
+                        ]);
+                        return (
                         <section key={month.key} className="space-y-4 rounded-2xl border border-slate-800 bg-slate-900/60 p-4 sm:p-5">
                           <header className="flex flex-wrap items-center justify-between gap-2">
                             <h3 className="text-lg font-bold text-white">{month.label}</h3>
+                            <div className="flex items-center gap-2">
+                              {monthKeyMatch && (
+                                monthKeyMatch[1] === 'unspecified' ? (
+                                  <select
+                                    value={month.key}
+                                    onChange={(event) => moveMonthlyJournalMonth(month.key, event.target.value)}
+                                    disabled={!canManageMonth}
+                                    aria-label={`Change month for ${month.label}`}
+                                    title={!canManageMonth ? 'Add details to this missing-month placeholder before changing it.' : 'Change this month'}
+                                    className="rounded-lg border border-slate-700 bg-slate-950 px-2 py-2 text-xs text-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                  >
+                                    {MONTH_NAMES.map((name, monthIndex) => {
+                                      const optionKey = `unspecified-${monthIndex + 1}`;
+                                      return (
+                                        <option
+                                          key={optionKey}
+                                          value={optionKey}
+                                          disabled={optionKey !== month.key && occupiedMonthKeys.has(optionKey)}
+                                        >
+                                          {name}
+                                        </option>
+                                      );
+                                    })}
+                                  </select>
+                                ) : (
+                                  <input
+                                    type="month"
+                                    value={`${monthKeyMatch[1]}-${String(Number(monthKeyMatch[2])).padStart(2, '0')}`}
+                                    onChange={(event) => {
+                                      if (event.target.value) {
+                                        const [year, selectedMonth] = event.target.value.split('-');
+                                        moveMonthlyJournalMonth(month.key, `${year}-${Number(selectedMonth)}`);
+                                      }
+                                    }}
+                                    disabled={!canManageMonth}
+                                    aria-label={`Change month for ${month.label}`}
+                                    title={!canManageMonth ? 'Add details to this missing-month placeholder before changing it.' : 'Change this month'}
+                                    className="rounded-lg border border-slate-700 bg-slate-950 px-2 py-2 text-xs text-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                  />
+                                )
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => removeMonthlyJournalMonth(month.key)}
+                                disabled={!canManageMonth}
+                                title={!canManageMonth ? 'This is an empty placeholder for a missing month.' : `Remove ${month.label}`}
+                                className="rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-xs font-semibold text-rose-300 transition hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+                              >
+                                Remove
+                              </button>
+                            </div>
                           </header>
                           <div className="grid gap-3 sm:grid-cols-2">
                             <label className="block text-xs font-semibold text-slate-300">
@@ -4114,7 +4370,8 @@ export default function Home() {
                             )}
                           </div>
                         </section>
-                      ))}
+                        );
+                      })}
                       {form.appendices.dailyJournal.length === 0 && (
                         <p className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 text-sm text-slate-400">
                           Add a journal week and enter dates to create monthly sections.
