@@ -431,38 +431,26 @@ function buildMonthlyJournalPages(appendices: AppendicesData): (Paragraph | Tabl
       }));
     }
 
-    const summaryCell = (text: string, bold = false) => new TableCell({
-      width: { size: 50, type: WidthType.PERCENTAGE },
-      margins: { top: 15, bottom: 15, left: 100, right: 100 },
-      children: [new Paragraph({
-        alignment: AlignmentType.LEFT,
+    children.push(
+      new Paragraph({
+        tabStops: [{ type: 'left', position: 4680 }],
         spacing: { before: 0, after: 0, line: 276, lineRule: 'auto' },
-        children: [new TextRun({ text, bold, size: 22, font: 'Times New Roman' })],
-      })],
-    });
-    children.push(new Table({
-      rows: [
-        new TableRow({
-          cantSplit: true,
-          children: [summaryCell('Actual Duty Days', true), summaryCell('Total Hours Rendered', true)],
-        }),
-        new TableRow({
-          cantSplit: true,
-          children: [summaryCell(month.actualDutyDays), summaryCell(month.totalHoursRendered)],
-        }),
-      ],
-      alignment: AlignmentType.CENTER,
-      width: { size: 100, type: WidthType.PERCENTAGE },
-      columnWidths: [5000, 5000],
-      borders: {
-        top: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
-        bottom: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
-        left: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
-        right: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
-        insideHorizontal: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
-        insideVertical: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
-      },
-    }));
+        children: [
+          new TextRun({ text: 'Actual Duty Days', bold: true, size: 22, font: 'Times New Roman' }),
+          new TextRun({ text: '\t', size: 22, font: 'Times New Roman' }),
+          new TextRun({ text: 'Total Hours Rendered', bold: true, size: 22, font: 'Times New Roman' }),
+        ],
+      }),
+      new Paragraph({
+        tabStops: [{ type: 'left', position: 4680 }],
+        spacing: { before: 0, after: 0, line: 276, lineRule: 'auto' },
+        children: [
+          new TextRun({ text: month.actualDutyDays, size: 22, font: 'Times New Roman' }),
+          new TextRun({ text: '\t', size: 22, font: 'Times New Roman' }),
+          new TextRun({ text: month.totalHoursRendered, size: 22, font: 'Times New Roman' }),
+        ],
+      }),
+    );
 
     children.push(new Paragraph({
       alignment: AlignmentType.LEFT,
@@ -496,25 +484,61 @@ function buildMonthlyJournalPages(appendices: AppendicesData): (Paragraph | Tabl
       });
     }
 
+    const monthlyPhotos = appendices.dailyJournalMonthlySummaries?.[month.key]?.photos || [];
     const photoWeekIndices = Array.from(new Set(month.activities.map(({ weekIndex }) => weekIndex)))
       .filter((weekIndex) => !photoWeeksIncluded.has(weekIndex));
-    const photos = photoWeekIndices.flatMap((weekIndex) => {
+    const weeklyPhotos = photoWeekIndices.flatMap((weekIndex) => {
       photoWeeksIncluded.add(weekIndex);
       const week = weeks[weekIndex];
       return (week?.currentLayoutImages || week?.images || []).filter(Boolean) as (string | AppendixImage)[];
     });
+    const photos = monthlyPhotos.length > 0 ? monthlyPhotos : weeklyPhotos;
     if (photos.length > 0) {
       const captionedPhotos = photos.map((photo) => {
         const detail = typeof photo === 'string' ? '' : photo.detail?.trim() || '';
         const caption = `Figure ${figureNumber++}${detail ? `: ${detail}` : ': Monthly journal photo'}`;
-        return typeof photo === 'string'
-          ? { base64: photo, detail: caption }
-          : { ...photo, detail: caption };
+        const base64 = typeof photo === 'string' ? photo : photo.base64;
+        const buffer = parseBase64Image(base64);
+        return buffer ? { buffer, caption } : null;
       });
-      children.push(
-        new Paragraph({ spacing: { before: 120, after: 0 } }),
-        buildImageGridTable(captionedPhotos),
-      );
+      const validPhotos = captionedPhotos.filter((photo): photo is NonNullable<typeof photo> => photo !== null);
+      for (let index = 0; index < validPhotos.length; index += 2) {
+        const pair = validPhotos.slice(index, index + 2);
+        children.push(
+          new Paragraph({
+            alignment: pair.length === 1 ? AlignmentType.CENTER : AlignmentType.LEFT,
+            tabStops: [{ type: 'left', position: 4680 }],
+            spacing: { before: 120, after: 0 },
+            children: [
+              new ImageRun({
+                type: 'png',
+                data: pair[0].buffer,
+                transformation: { width: 280, height: 210 },
+              }),
+              ...(pair.length === 2 ? [
+                new TextRun({ text: '\t' }),
+                new ImageRun({
+                  type: 'png' as const,
+                  data: pair[1].buffer,
+                  transformation: { width: 280, height: 210 },
+                }),
+              ] : []),
+            ],
+          }),
+          new Paragraph({
+            alignment: pair.length === 1 ? AlignmentType.CENTER : AlignmentType.LEFT,
+            tabStops: [{ type: 'left', position: 4680 }],
+            spacing: { before: 0, after: 120 },
+            children: [
+              new TextRun({ text: pair[0].caption, size: 24, font: 'Times New Roman' }),
+              ...(pair.length === 2 ? [
+                new TextRun({ text: '\t', size: 24, font: 'Times New Roman' }),
+                new TextRun({ text: pair[1].caption, size: 24, font: 'Times New Roman' }),
+              ] : []),
+            ],
+          }),
+        );
+      }
     }
   });
 
@@ -522,7 +546,11 @@ function buildMonthlyJournalPages(appendices: AppendicesData): (Paragraph | Tabl
 }
 
 function buildTemplateDailyJournal(appendices: AppendicesData | undefined): (Paragraph | Table)[] {
-  if (!appendices?.dailyJournal?.length) return [];
+  if (!appendices) return [];
+  const hasDailyJournal = Boolean(appendices.dailyJournal?.length);
+  const hasMonthlySummaries = appendices.dailyJournalLayout === 'monthly'
+    && Boolean(Object.keys(appendices.dailyJournalMonthlySummaries || {}).length);
+  if (!hasDailyJournal && !hasMonthlySummaries) return [];
   const children: (Paragraph | Table)[] = [
     new Paragraph({
       alignment: AlignmentType.CENTER,
@@ -541,7 +569,7 @@ function buildTemplateDailyJournal(appendices: AppendicesData | undefined): (Par
     return children;
   }
 
-  appendices.dailyJournal.forEach((week, index) => {
+  (appendices.dailyJournal || []).forEach((week, index) => {
     if (layout === 'report') {
       const reportImages = week.reportLayoutImages || week.images || [];
       children.push(

@@ -4,6 +4,7 @@ export type MonthlyJournalSummary = {
   totalHoursRendered?: string;
   activitiesPerformed?: string;
   learningExperience?: string;
+  photos?: { base64: string; detail: string }[];
 };
 
 export type MonthlyJournalActivity = {

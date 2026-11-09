@@ -1475,6 +1475,7 @@ export default function Home() {
   const [showAiDraftReview, setShowAiDraftReview] = useState(false);
   const [status, setStatus] = useState('Draft ready');
   const [aiGenerating, setAiGenerating] = useState('');
+  const [monthlyJournalAiErrors, setMonthlyJournalAiErrors] = useState<Record<string, string>>({});
   
   // Tour State
   const [runTour, setRunTour] = useState(false);
@@ -2232,6 +2233,7 @@ export default function Home() {
               totalHoursRendered: '',
               activitiesPerformed: '',
               learningExperience: '',
+              photos: [],
             },
           },
         },
@@ -2414,6 +2416,151 @@ export default function Home() {
     } catch (error) {
       console.error(error);
       alert('The selected journal image could not be processed.');
+    }
+  };
+
+  const handleMonthlyJournalImageUpload = async (
+    event: React.ChangeEvent<HTMLInputElement>,
+    monthKey: string,
+  ) => {
+    const files = Array.from(event.target.files || []);
+    event.target.value = '';
+    if (files.length === 0) return;
+    const existingPhotos = form.appendices.dailyJournalMonthlySummaries[monthKey]?.photos || [];
+    if (existingPhotos.length + files.length > 4) {
+      setStatus('Maximum of 4 photos allowed per month.');
+      return;
+    }
+
+    try {
+      const newPhotos = await Promise.all(files.map(async (file) => {
+        if (!file.type.startsWith('image/')) {
+          throw new Error('Choose image files for monthly photo documentation.');
+        }
+        return {
+          base64: await compressImageDataUrl(file, 1200, 0.7),
+          detail: file.name.replace(/\.[^.]+$/, ''),
+        };
+      }));
+      setForm((previous) => ({
+        ...previous,
+        appendices: {
+          ...previous.appendices,
+          dailyJournalMonthlySummaries: {
+            ...previous.appendices.dailyJournalMonthlySummaries,
+            [monthKey]: {
+              ...previous.appendices.dailyJournalMonthlySummaries[monthKey],
+              photos: [
+                ...(previous.appendices.dailyJournalMonthlySummaries[monthKey]?.photos || []),
+                ...newPhotos,
+              ],
+            },
+          },
+        },
+      }));
+      setStatus(`Added ${newPhotos.length} monthly photo${newPhotos.length === 1 ? '' : 's'}.`);
+    } catch (error) {
+      console.error('Could not add monthly journal photos:', error);
+      setStatus(error instanceof Error ? error.message : 'Could not add monthly photos.');
+    }
+  };
+
+  const updateMonthlyJournalPhotoDetail = (monthKey: string, photoIndex: number, detail: string) => {
+    setForm((previous) => {
+      const summary = previous.appendices.dailyJournalMonthlySummaries[monthKey] || {};
+      const photos = [...(summary.photos || [])];
+      if (!photos[photoIndex]) return previous;
+      photos[photoIndex] = { ...photos[photoIndex], detail };
+      return {
+        ...previous,
+        appendices: {
+          ...previous.appendices,
+          dailyJournalMonthlySummaries: {
+            ...previous.appendices.dailyJournalMonthlySummaries,
+            [monthKey]: { ...summary, photos },
+          },
+        },
+      };
+    });
+  };
+
+  const removeMonthlyJournalPhoto = (monthKey: string, photoIndex: number) => {
+    setForm((previous) => {
+      const summary = previous.appendices.dailyJournalMonthlySummaries[monthKey] || {};
+      const photos = (summary.photos || []).filter((_, index) => index !== photoIndex);
+      return {
+        ...previous,
+        appendices: {
+          ...previous.appendices,
+          dailyJournalMonthlySummaries: {
+            ...previous.appendices.dailyJournalMonthlySummaries,
+            [monthKey]: { ...summary, photos },
+          },
+        },
+      };
+    });
+  };
+
+  const generateMonthlyJournalField = async (
+    monthKey: string,
+    monthLabel: string,
+    field: 'activitiesPerformed' | 'learningExperience',
+  ) => {
+    const generationKey = `monthly-${monthKey}-${field}`;
+    const errorKey = `${monthKey}-${field}`;
+    const photos = form.appendices.dailyJournalMonthlySummaries[monthKey]?.photos || [];
+    if (!photos.length) {
+      setMonthlyJournalAiErrors((previous) => ({
+        ...previous,
+        [errorKey]: 'Add at least one photo to this month before generating.',
+      }));
+      return;
+    }
+    if (aiGenerating) return;
+
+    setAiGenerating(generationKey);
+    setMonthlyJournalAiErrors((previous) => {
+      const next = { ...previous };
+      delete next[errorKey];
+      return next;
+    });
+    setStatus(`Generating ${field === 'activitiesPerformed' ? 'monthly activities' : 'monthly learning'} from photos...`);
+
+    try {
+      const response = await fetch('/api/ai/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: field === 'activitiesPerformed'
+            ? 'Monthly Journal Activities Performed'
+            : 'Monthly Journal Learning Experience',
+          imageData: photos.map((photo) => photo.base64),
+          instructions: field === 'activitiesPerformed'
+            ? `Write one concise monthly Activities Performed paragraph based only on what is clearly visible in this month's uploaded photos (${monthLabel}). Describe observable activities without claiming the student personally performed them, or inventing dates, duties, results, or context.`
+            : `Write one concise monthly Learning / Experience paragraph based only on clear learning evidence visible in this month's uploaded photos (${monthLabel}). Do not infer the student's feelings, skills, lessons, or personal growth. If personal learning is not visible, briefly ask the user to add their reflection instead of guessing.`,
+          outputUnit: 'paragraphs',
+          outputCount: 1,
+        }),
+      });
+      const result: unknown = await response.json().catch(() => null);
+      if (!response.ok) {
+        const message = isRecord(result) && typeof result.error === 'string'
+          ? result.error
+          : 'Could not generate the monthly journal text. Please try again.';
+        throw new Error(message);
+      }
+      if (!isRecord(result) || typeof result.text !== 'string' || !result.text.trim()) {
+        throw new Error('The AI service returned no text. Please try again.');
+      }
+
+      updateMonthlyJournalSummary(monthKey, field, result.text.trim());
+      setStatus(`${field === 'activitiesPerformed' ? 'Activities Performed' : 'Learning / Experience'} drafted. Review and edit the text.`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not generate the monthly journal text.';
+      setMonthlyJournalAiErrors((previous) => ({ ...previous, [errorKey]: message }));
+      setStatus(message);
+    } finally {
+      setAiGenerating('');
     }
   };
 
@@ -3869,11 +4016,6 @@ export default function Home() {
                         <section key={month.key} className="space-y-4 rounded-2xl border border-slate-800 bg-slate-900/60 p-4 sm:p-5">
                           <header className="flex flex-wrap items-center justify-between gap-2">
                             <h3 className="text-lg font-bold text-white">{month.label}</h3>
-                            <span className="text-xs text-slate-400">
-                              {month.activities.length > 0
-                                ? `${month.activities.length} journal ${month.activities.length === 1 ? 'day' : 'days'}`
-                                : 'Monthly summary'}
-                            </span>
                           </header>
                           <div className="grid gap-3 sm:grid-cols-2">
                             <label className="block text-xs font-semibold text-slate-300">
@@ -3908,61 +4050,24 @@ export default function Home() {
                             </div>
                           </div>
 
-                          <div className="overflow-hidden rounded-xl border border-slate-800 bg-slate-950/60">
-                            <div className="hidden gap-px bg-slate-800 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-300 sm:grid sm:grid-cols-[0.7fr_1.2fr_3fr_0.8fr]">
-                              <div className="bg-slate-900/80 px-3 py-2">Day</div>
-                              <div className="bg-slate-900/80 px-3 py-2">Date</div>
-                              <div className="bg-slate-900/80 px-3 py-2">Accomplishment</div>
-                              <div className="bg-slate-900/80 px-3 py-2">Hours</div>
-                            </div>
-                            <div className="space-y-2 p-2 sm:space-y-0 sm:p-0">
-                              {month.activities.map(({ weekIndex, dayIndex, activity }) => (
-                                <div key={`${weekIndex}-${dayIndex}`} className="grid gap-px rounded-lg border border-slate-800 bg-slate-800 sm:rounded-none sm:border-0 sm:border-t sm:grid-cols-[0.7fr_1.2fr_3fr_0.8fr]">
-                                  <div className="bg-slate-950/70 p-3">
-                                    <span className="mb-1 block text-[9px] font-bold uppercase tracking-wider text-slate-500 sm:hidden">Day</span>
-                                    <span className="text-xs text-slate-200">{activity.day || `Day ${dayIndex + 1}`}</span>
-                                  </div>
-                                  <div className="bg-slate-950/70 p-3">
-                                    <label className="mb-1 block text-[9px] font-bold uppercase tracking-wider text-slate-500 sm:hidden" htmlFor={`monthly-date-${weekIndex}-${dayIndex}`}>Date</label>
-                                    <input
-                                      id={`monthly-date-${weekIndex}-${dayIndex}`}
-                                      type="text"
-                                      value={activity.date}
-                                      onChange={(event) => updateDayActivity(weekIndex, dayIndex, 'date', event.target.value)}
-                                      className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-2 text-xs text-slate-100 focus:border-cyan-400 focus:outline-none"
-                                    />
-                                  </div>
-                                  <div className="bg-slate-950/70 p-3">
-                                    <span className="mb-1 block text-[9px] font-bold uppercase tracking-wider text-slate-500 sm:hidden">Accomplishment</span>
-                                    <button
-                                      type="button"
-                                      onClick={() => openMobileAccomplishmentEditor(weekIndex, dayIndex, activity.accomplishment)}
-                                      aria-label={`Edit accomplishment for ${activity.day || `Day ${dayIndex + 1}`}`}
-                                      className="flex min-h-11 w-full items-start justify-between gap-2 rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-2 text-left text-xs text-slate-100"
-                                    >
-                                      <span className="min-w-0 flex-1 whitespace-pre-wrap break-words">{activity.accomplishment || 'Tap to add accomplishment'}</span>
-                                      <Maximize2 size={15} className="mt-0.5 shrink-0 text-cyan-300" aria-hidden="true" />
-                                    </button>
-                                  </div>
-                                  <div className="bg-slate-950/70 p-3">
-                                    <label className="mb-1 block text-[9px] font-bold uppercase tracking-wider text-slate-500 sm:hidden" htmlFor={`monthly-hours-${weekIndex}-${dayIndex}`}>Hours</label>
-                                    <input
-                                      id={`monthly-hours-${weekIndex}-${dayIndex}`}
-                                      type="number"
-                                      min="0"
-                                      step="0.5"
-                                      value={activity.hours}
-                                      onChange={(event) => updateDayActivity(weekIndex, dayIndex, 'hours', event.target.value)}
-                                      className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-2 text-xs text-slate-100 focus:border-cyan-400 focus:outline-none"
-                                    />
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-
                           <label className="block text-sm font-semibold text-slate-200">
-                            Activities Performed
+                            <span className="flex flex-wrap items-center justify-between gap-2">
+                              <span>Activities Performed</span>
+                              <button
+                                type="button"
+                                onClick={() => void generateMonthlyJournalField(month.key, month.label, 'activitiesPerformed')}
+                                disabled={Boolean(aiGenerating) || !(form.appendices.dailyJournalMonthlySummaries[month.key]?.photos?.length)}
+                                className="inline-flex min-h-9 items-center justify-center gap-2 rounded-lg border border-violet-400/30 bg-violet-500/10 px-3 py-1.5 text-xs font-semibold text-violet-200 transition hover:bg-violet-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                <Sparkles size={14} aria-hidden="true" />
+                                {aiGenerating === `monthly-${month.key}-activitiesPerformed` ? 'Generating...' : 'Generate with AI'}
+                              </button>
+                            </span>
+                            {monthlyJournalAiErrors[`${month.key}-activitiesPerformed`] && (
+                              <span role="alert" className="mt-2 block text-xs font-normal text-rose-300">
+                                {monthlyJournalAiErrors[`${month.key}-activitiesPerformed`]}
+                              </span>
+                            )}
                             <textarea
                               rows={4}
                               value={month.activitiesPerformed}
@@ -3972,7 +4077,23 @@ export default function Home() {
                             />
                           </label>
                           <label className="block text-sm font-semibold text-slate-200">
-                            Learning / Experience
+                            <span className="flex flex-wrap items-center justify-between gap-2">
+                              <span>Learning / Experience</span>
+                              <button
+                                type="button"
+                                onClick={() => void generateMonthlyJournalField(month.key, month.label, 'learningExperience')}
+                                disabled={Boolean(aiGenerating) || !(form.appendices.dailyJournalMonthlySummaries[month.key]?.photos?.length)}
+                                className="inline-flex min-h-9 items-center justify-center gap-2 rounded-lg border border-violet-400/30 bg-violet-500/10 px-3 py-1.5 text-xs font-semibold text-violet-200 transition hover:bg-violet-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                <Sparkles size={14} aria-hidden="true" />
+                                {aiGenerating === `monthly-${month.key}-learningExperience` ? 'Generating...' : 'Generate with AI'}
+                              </button>
+                            </span>
+                            {monthlyJournalAiErrors[`${month.key}-learningExperience`] && (
+                              <span role="alert" className="mt-2 block text-xs font-normal text-rose-300">
+                                {monthlyJournalAiErrors[`${month.key}-learningExperience`]}
+                              </span>
+                            )}
                             <textarea
                               rows={3}
                               value={month.learningExperience}
@@ -3981,18 +4102,50 @@ export default function Home() {
                               className={fieldClass}
                             />
                           </label>
-                          {month.activities[0] && (
+                          <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3 sm:p-4">
                             <label className="block text-xs font-semibold text-slate-300">
-                              Monthly Photo Documentation
+                              Monthly Photo Documentation (Max 4)
                               <input
                                 type="file"
                                 accept="image/png, image/jpeg, image/jpg, image/webp"
-                                onChange={(event) => handleJournalImageUpload(event, month.activities[0].weekIndex)}
-                                className={fileInputClass}
+                                multiple
+                                onChange={(event) => void handleMonthlyJournalImageUpload(event, month.key)}
+                                disabled={(form.appendices.dailyJournalMonthlySummaries[month.key]?.photos?.length || 0) >= 4}
+                                className={`${fileInputClass} disabled:cursor-not-allowed disabled:opacity-50`}
                               />
-                              <span className="mt-1 block text-[10px] font-normal text-slate-500">Photos are stored with the first journal week in this month.</span>
                             </label>
-                          )}
+                            {(form.appendices.dailyJournalMonthlySummaries[month.key]?.photos || []).length > 0 && (
+                              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                                {(form.appendices.dailyJournalMonthlySummaries[month.key]?.photos || []).map((photo, photoIndex) => (
+                                  <div key={`${month.key}-photo-${photoIndex}`} className="rounded-lg border border-slate-800 bg-slate-900/70 p-2">
+                                    <div className="relative">
+                                      <img
+                                        src={photo.base64}
+                                        alt={photo.detail || `Monthly photo ${photoIndex + 1}`}
+                                        className="h-36 w-full rounded-md object-cover"
+                                      />
+                                      <button
+                                        type="button"
+                                        onClick={() => removeMonthlyJournalPhoto(month.key, photoIndex)}
+                                        aria-label={`Remove monthly photo ${photoIndex + 1}`}
+                                        className="absolute right-2 top-2 rounded-md bg-slate-950/80 px-2 py-1 text-xs font-bold text-rose-300 hover:bg-rose-950"
+                                      >
+                                        Remove
+                                      </button>
+                                    </div>
+                                    <input
+                                      type="text"
+                                      value={photo.detail}
+                                      onChange={(event) => updateMonthlyJournalPhotoDetail(month.key, photoIndex, event.target.value)}
+                                      placeholder="Figure caption"
+                                      aria-label={`Caption for monthly photo ${photoIndex + 1}`}
+                                      className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-2 text-xs text-slate-100 focus:border-cyan-400 focus:outline-none"
+                                    />
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
                         </section>
                       ))}
                       {form.appendices.dailyJournal.length === 0 && (
