@@ -1470,6 +1470,8 @@ export default function Home() {
     weekIndex: number;
     dayIndex: number;
     draft: string;
+    details: string;
+    generationError: string;
   } | null>(null);
   const previewContainerRef = useRef<HTMLDivElement>(null);
   const previewRequestRef = useRef<AbortController | null>(null);
@@ -2152,7 +2154,91 @@ export default function Home() {
   };
 
   const openMobileAccomplishmentEditor = (weekIndex: number, dayIndex: number, value: string) => {
-    setMobileAccomplishmentEditor({ weekIndex, dayIndex, draft: value });
+    setMobileAccomplishmentEditor({ weekIndex, dayIndex, draft: value, details: '', generationError: '' });
+  };
+
+  const generateDailyAccomplishment = async () => {
+    if (!mobileAccomplishmentEditor || aiGenerating) return;
+
+    const { weekIndex, dayIndex, draft, details } = mobileAccomplishmentEditor;
+    const week = form.appendices.dailyJournal[weekIndex];
+    const activity = week?.activities[dayIndex];
+    if (!week || !activity) return;
+
+    const photo = week.currentLayoutImages?.[dayIndex]
+      || week.reportLayoutImages?.[dayIndex]
+      || week.images?.[dayIndex];
+    if (!photo) {
+      setMobileAccomplishmentEditor((current) => current
+        ? { ...current, generationError: 'Add a photo for this day in the Documentation column before generating.' }
+        : current);
+      return;
+    }
+    if (!draft.trim() && !details.trim()) {
+      setMobileAccomplishmentEditor((current) => current
+        ? { ...current, generationError: 'Add what you did in the accomplishment or extra details before generating.' }
+        : current);
+      return;
+    }
+
+    setAiGenerating(`journal-accomplishment-${weekIndex}-${dayIndex}`);
+    setStatus(`Generating ${activity.day} accomplishment with photo evidence...`);
+    setMobileAccomplishmentEditor((current) => current
+      ? { ...current, generationError: '' }
+      : current);
+    try {
+      const response = await fetch('/api/ai/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: 'Daily Journal Accomplishment',
+          sourceDetails: {
+            weekNumber: week.weekNumber,
+            activity: {
+              day: aiText(activity.day, 40),
+              date: aiText(activity.date, 40),
+              hours: activity.hours,
+              existingAccomplishment: aiText(draft, 500),
+            },
+            otherActivities: getUserJournalActivities(form, weekIndex)
+              .filter((entry) => entry.day !== activity.day)
+              .slice(0, 6),
+            photoCaption: aiText(photo.detail, 500),
+          },
+          imageEvidence: [{ data: photo.base64, detail: aiText(photo.detail, 500) }],
+          currentText: aiText(draft, 1000),
+          focus: aiText(details, 2000),
+          instructions: 'Write one concise accomplishment for the selected day using the user details and the matching photo as evidence.',
+          outputUnit: 'sentences',
+          outputCount: 1,
+        }),
+      });
+      const result: unknown = await response.json().catch(() => null);
+      if (!response.ok) {
+        const message = response.status === 413
+          ? 'The photo is too large to send for AI drafting. Replace it with a smaller image and try again.'
+          : isRecord(result) && typeof result.error === 'string'
+            ? result.error
+            : 'Could not generate the accomplishment. Please try again.';
+        throw new Error(message);
+      }
+      if (!isRecord(result) || typeof result.text !== 'string' || !result.text.trim()) {
+        throw new Error('The AI service returned no text. Please try again.');
+      }
+      const generatedText = result.text.trim();
+      setMobileAccomplishmentEditor((current) => current
+        ? { ...current, draft: generatedText, generationError: '' }
+        : current);
+      setStatus(`${activity.day} accomplishment generated and aligned`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not generate the accomplishment.';
+      setStatus(message);
+      setMobileAccomplishmentEditor((current) => current
+        ? { ...current, generationError: message }
+        : current);
+    } finally {
+      setAiGenerating('');
+    }
   };
 
   const saveMobileAccomplishment = () => {
@@ -2677,15 +2763,55 @@ export default function Home() {
               </h2>
               <p className="mt-1 text-xs text-slate-400">Accomplishment</p>
             </header>
-            <textarea
-              autoFocus
-              value={mobileAccomplishmentEditor.draft}
-              onChange={(event) => setMobileAccomplishmentEditor((current) => current ? { ...current, draft: event.target.value } : current)}
-              className="min-h-0 flex-1 resize-none overflow-y-auto overscroll-contain bg-slate-950 px-4 py-4 text-base leading-6 text-slate-100 placeholder:text-slate-500 focus:outline-none sm:px-6"
-              placeholder="Describe your accomplishment"
-              aria-label="Accomplishment details"
-            />
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-4 py-4 sm:px-6">
+              <textarea
+                autoFocus
+                value={mobileAccomplishmentEditor.draft}
+                onChange={(event) => setMobileAccomplishmentEditor((current) => current ? { ...current, draft: event.target.value, generationError: '' } : current)}
+                className="min-h-36 w-full resize-y rounded-xl border border-slate-700 bg-slate-900 px-3 py-3 text-base leading-6 text-slate-100 placeholder:text-slate-500 focus:border-cyan-400 focus:outline-none"
+                placeholder="Describe what you did"
+                aria-label="Accomplishment details"
+              />
+              <label className="block text-xs font-medium text-slate-300">
+                Extra details to align the accomplishment (optional)
+                <textarea
+                  value={mobileAccomplishmentEditor.details}
+                  onChange={(event) => setMobileAccomplishmentEditor((current) => current ? { ...current, details: event.target.value, generationError: '' } : current)}
+                  className="mt-1 min-h-20 w-full resize-y rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-cyan-400 focus:outline-none"
+                  placeholder="Add the task, tools, or outcome you want reflected"
+                  aria-label="Additional accomplishment details"
+                />
+              </label>
+              {(() => {
+                const week = form.appendices.dailyJournal[mobileAccomplishmentEditor.weekIndex];
+                const photo = week?.currentLayoutImages?.[mobileAccomplishmentEditor.dayIndex]
+                  || week?.reportLayoutImages?.[mobileAccomplishmentEditor.dayIndex]
+                  || week?.images?.[mobileAccomplishmentEditor.dayIndex];
+                return photo ? (
+                  <div className="flex items-center gap-3 rounded-xl border border-slate-800 bg-slate-900/70 p-2">
+                    <img src={photo.base64} alt="Photo evidence for this day" className="h-16 w-20 rounded-lg object-cover" />
+                    <p className="text-xs text-slate-300">{photo.detail || 'Photo documentation for this day'}</p>
+                  </div>
+                ) : (
+                  <p className="text-xs text-amber-200">Upload a photo for this day in the Documentation column to enable photo-based generation.</p>
+                );
+              })()}
+              {mobileAccomplishmentEditor.generationError && (
+                <p role="alert" className="text-sm text-rose-300">{mobileAccomplishmentEditor.generationError}</p>
+              )}
+            </div>
             <footer className="flex gap-3 border-t border-slate-800 bg-slate-950 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 sm:px-6 sm:pb-4">
+              <button
+                type="button"
+                onClick={generateDailyAccomplishment}
+                disabled={Boolean(aiGenerating)}
+                className="min-h-11 flex-1 rounded-xl border border-violet-400/40 bg-violet-500/10 px-3 text-sm font-semibold text-violet-200 disabled:cursor-wait disabled:opacity-60 sm:flex-none"
+              >
+                <span className="inline-flex items-center justify-center gap-2">
+                  <Sparkles size={15} aria-hidden="true" />
+                  {aiGenerating === `journal-accomplishment-${mobileAccomplishmentEditor.weekIndex}-${mobileAccomplishmentEditor.dayIndex}` ? 'Generating…' : 'Generate with AI'}
+                </span>
+              </button>
               <button
                 type="button"
                 onClick={() => setMobileAccomplishmentEditor(null)}
