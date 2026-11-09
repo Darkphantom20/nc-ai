@@ -15,6 +15,12 @@ export function matchesRequestedLength(text: string, unit: 'sentences' | 'paragr
   return sentenceCount === count && !text.slice(coveredUntil).trim();
 }
 
+export function matchesRequestedSentencesPerParagraph(text: string, count: number): boolean {
+  const paragraphs = text.split(/\r?\n\s*\r?\n/).filter((paragraph) => paragraph.trim());
+  return paragraphs.length > 0
+    && paragraphs.every((paragraph) => matchesRequestedLength(paragraph, 'sentences', count));
+}
+
 export function hasUnsupportedAcknowledgementClaims(text: string, evidence: string): boolean {
   const claims = [
     /\b(?:thank(?:s|ed)?|gratitude|grateful)\b/i,

@@ -1,5 +1,9 @@
 import { NextResponse } from 'next/server';
-import { hasUnsupportedAcknowledgementClaims, matchesRequestedLength } from '../../../../lib/ai-validation';
+import {
+  hasUnsupportedAcknowledgementClaims,
+  matchesRequestedLength,
+  matchesRequestedSentencesPerParagraph,
+} from '../../../../lib/ai-validation';
 import {
   DEFAULT_CLOUDFLARE_MODEL,
   getCloudflareAccounts,
@@ -96,10 +100,15 @@ function responseValidationError(
   acknowledgementRequest: boolean,
   issueRequest: boolean,
   factualEvidence: string,
+  sentencesPerParagraph?: number,
 ): string {
   if (!text) return `${providerName} returned no text.`;
   if (!matchesRequestedLength(text, outputUnit, outputCount)) {
     return `${providerName} did not return exactly ${outputCount} ${outputUnit}.`;
+  }
+  if (outputUnit === 'paragraphs' && sentencesPerParagraph !== undefined
+    && !matchesRequestedSentencesPerParagraph(text, sentencesPerParagraph)) {
+    return `${providerName} did not return exactly ${sentencesPerParagraph} sentences in each paragraph.`;
   }
   if (issueRequest) {
     const recommendationPattern = /\b(?:to address (?:this|the) challenge|recommend\w*|suggest\w*|proposed solution|solution would|should (?:create|develop|implement|use|establish)|could (?:create|develop|implement|use|establish))\b/i;
@@ -177,15 +186,25 @@ export async function POST(request: Request) {
         ? 'sentences'
         : '';
     const outputCount = body.outputCount === undefined ? 1 : Number(body.outputCount);
+    const sentencesPerParagraph = body.sentencesPerParagraph === undefined
+      ? undefined
+      : Number(body.sentencesPerParagraph);
     if (!outputUnit || !Number.isInteger(outputCount) || outputCount < 1 || outputCount > 10) {
       return NextResponse.json(
         { error: 'Choose between 1 and 10 sentences or paragraphs.' },
         { status: 400 },
       );
     }
+    if (sentencesPerParagraph !== undefined
+      && (!Number.isInteger(sentencesPerParagraph) || sentencesPerParagraph < 1 || sentencesPerParagraph > 10)) {
+      return NextResponse.json(
+        { error: 'Choose between 1 and 10 sentences per paragraph.' },
+        { status: 400 },
+      );
+    }
     const maxOutputTokens = outputUnit === 'sentences'
       ? Math.min(900, 80 + outputCount * 55)
-      : Math.min(1800, 120 + outputCount * 170);
+      : Math.min(3000, 120 + outputCount * (sentencesPerParagraph || 3) * 55);
 
     let sourceDetails = '';
     if (body.sourceDetails !== undefined && body.sourceDetails !== null) {
@@ -343,7 +362,7 @@ export async function POST(request: Request) {
       'For solution/action sections, describe actions as completed only when the user documented them. If only a potential challenge is supported, a suggested response may be offered only when clearly labeled as a recommendation, not an action already taken.',
       'Rewrite the supplied details clearly without changing their meaning or adding generic filler.',
       'Use first-person language when the section naturally describes the student experience. Otherwise use a formal academic or organizational voice.',
-      `Output exactly ${outputCount} ${outputUnit}. If sentences are requested, return exactly that many complete sentences in one paragraph. If paragraphs are requested, return exactly that many non-empty paragraphs separated by one blank line, with 1 to 3 concise sentences per paragraph.`,
+      `Output exactly ${outputCount} ${outputUnit}. If sentences are requested, return exactly that many complete sentences in one paragraph. If paragraphs are requested, return exactly that many non-empty paragraphs separated by one blank line${sentencesPerParagraph === undefined ? ', with 1 to 3 concise sentences per paragraph' : `, with exactly ${sentencesPerParagraph} complete sentences in each paragraph`}.`,
       'Do not use headings, labels, bullets, or numbered lists.',
       'If the source does not contain enough information, use the requested output length to state what information the user needs to add. Do not guess.',
       hasImages
@@ -462,6 +481,7 @@ export async function POST(request: Request) {
                 acknowledgementRequest,
                 issueRequest,
                 factualEvidence,
+                sentencesPerParagraph,
               );
               if (!validationError) {
                 text = candidateText;
@@ -535,6 +555,7 @@ export async function POST(request: Request) {
                 acknowledgementRequest,
                 issueRequest,
                 factualEvidence,
+                sentencesPerParagraph,
               );
               if (!validationError) {
                 text = candidateText;
@@ -594,6 +615,7 @@ export async function POST(request: Request) {
                 acknowledgementRequest,
                 issueRequest,
                 factualEvidence,
+                sentencesPerParagraph,
               );
               if (!validationError) {
                 text = candidateText;
@@ -661,6 +683,7 @@ export async function POST(request: Request) {
                 acknowledgementRequest,
                 issueRequest,
                 factualEvidence,
+                sentencesPerParagraph,
               );
               if (!validationError) {
                 text = candidateText;
