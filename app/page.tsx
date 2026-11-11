@@ -222,6 +222,28 @@ type JournalPhoto = { base64: string; detail: string };
 type NarrativeJournalWeek = {
   weekNumber: number;
   totalHours: number | string;
+type MonthlyPhotoCandidate = {
+  id: string;
+  photo: JournalPhoto;
+  description: string;
+};
+
+type MonthlyPhotoSelectionGroup = {
+  key: string;
+  label: string;
+  activityCount: number;
+  datedActivityCount: number;
+  periodCovered: string;
+  candidates: MonthlyPhotoCandidate[];
+  selectedIds: string[];
+};
+
+type MonthlyPhotoSelection = {
+  preference: string;
+  groups: MonthlyPhotoSelectionGroup[];
+  error: string;
+};
+
   narrative: string;
   activities: NarrativeDailyActivity[];
   images?: (JournalPhoto | null)[];
@@ -1642,6 +1664,7 @@ export default function Home() {
 
     const interval = window.setInterval(() => {
       setCompletionSlideIndex((prev) => (prev === 0 ? 1 : 0));
+  const [monthlyPhotoSelection, setMonthlyPhotoSelection] = useState<MonthlyPhotoSelection | null>(null);
     }, 3000);
 
     return () => window.clearInterval(interval);
@@ -2280,6 +2303,129 @@ export default function Home() {
       form.appendices.dailyJournal,
       form.appendices.dailyJournalMonthlySummaries,
     );
+  const openMonthlyPhotoSelection = () => {
+    const groups = getMonthlyJournalGroups(
+      form.appendices.dailyJournal,
+      form.appendices.dailyJournalMonthlySummaries,
+    ).map((month) => {
+      const candidates: MonthlyPhotoCandidate[] = [];
+      const seenImages = new Set<string>();
+      const summaryPhotos = form.appendices.dailyJournalMonthlySummaries[month.key]?.photos || [];
+
+      summaryPhotos.forEach((photo, photoIndex) => {
+        if (seenImages.has(photo.base64)) return;
+        seenImages.add(photo.base64);
+        candidates.push({
+          id: `monthly:${month.key}:${photoIndex}`,
+          photo,
+          description: photo.detail || `${month.label} monthly photo`,
+        });
+      });
+
+      month.activities.forEach(({ weekIndex, dayIndex, activity }) => {
+        const week = form.appendices.dailyJournal[weekIndex];
+        const photo = getDailyJournalPhoto(week, dayIndex, form.appendices.dailyJournalLayout);
+        if (!photo || seenImages.has(photo.base64)) return;
+        seenImages.add(photo.base64);
+        const activityDescription = [
+          activity.date.trim(),
+          activity.day.trim(),
+          aiText(activity.accomplishment, 180),
+        ].filter(Boolean).join(' · ');
+        const photoDescription = [activityDescription, aiText(photo.detail, 120)]
+          .filter(Boolean)
+          .join(' — ');
+        candidates.push({
+          id: `daily:${month.key}:${weekIndex}:${dayIndex}`,
+          photo: { ...photo, detail: photoDescription },
+          description: photoDescription,
+        });
+      });
+
+      return {
+        key: month.key,
+        label: month.label,
+        activityCount: month.activities.filter(({ weekIndex, dayIndex, activity }) => (
+          activity.date.trim()
+          || activity.accomplishment.trim()
+          || Boolean(getDailyJournalPhoto(
+            form.appendices.dailyJournal[weekIndex],
+            dayIndex,
+            form.appendices.dailyJournalLayout,
+          ))
+        )).length,
+        datedActivityCount: month.activities.filter(({ activity }) => activity.date.trim()).length,
+        periodCovered: month.periodCovered,
+        candidates,
+        selectedIds: candidates
+          .filter((candidate) => candidate.id.startsWith(`monthly:${month.key}:`))
+          .map((candidate) => candidate.id),
+      };
+    });
+
+    setMonthlyPhotoSelection({
+      preference: '',
+      groups,
+      error: '',
+    });
+    const detectedMonths = groups.filter((group) => group.activityCount > 0);
+    setStatus(
+      detectedMonths.length
+        ? `Detected ${detectedMonths.length} journal month${detectedMonths.length === 1 ? '' : 's'} from daily entry dates. Review the month groups before switching layouts.`
+        : 'No dated journal months detected. Add or correct daily dates to separate entries by month.',
+    );
+  };
+
+  const handleDailyJournalLayoutChange = (layout: 'current' | 'report' | 'no-photo' | 'monthly') => {
+    if (layout === 'monthly' && form.appendices.dailyJournalLayout !== 'monthly') {
+      openMonthlyPhotoSelection();
+      return;
+    }
+    updateDailyJournalLayout(layout);
+  };
+
+  const saveMonthlyPhotoSelection = () => {
+    if (!monthlyPhotoSelection) return;
+
+    const invalidGroup = monthlyPhotoSelection.groups.find((group) => {
+      if (!group.candidates.length) return false;
+      const minimum = Math.min(2, group.candidates.length);
+      return group.selectedIds.length < minimum || group.selectedIds.length > 4;
+    });
+    if (invalidGroup) {
+      setMonthlyPhotoSelection((current) => current
+        ? {
+            ...current,
+            error: `Select ${Math.min(2, invalidGroup.candidates.length)}–${Math.min(4, invalidGroup.candidates.length)} photos for ${invalidGroup.label}.`,
+          }
+        : current);
+      return;
+    }
+
+    setForm((previous) => {
+      const summaries = { ...previous.appendices.dailyJournalMonthlySummaries };
+      for (const group of monthlyPhotoSelection.groups) {
+        const selectedIds = new Set(group.selectedIds);
+        summaries[group.key] = {
+          ...summaries[group.key],
+          photos: group.candidates
+            .filter((candidate) => selectedIds.has(candidate.id))
+            .map((candidate) => candidate.photo),
+        };
+      }
+      return {
+        ...previous,
+        appendices: {
+          ...previous.appendices,
+          dailyJournalLayout: 'monthly',
+          dailyJournalMonthlySummaries: summaries,
+        },
+      };
+    });
+    setMonthlyPhotoSelection(null);
+    setStatus('Monthly layout selected with your chosen photos.');
+  };
+
     const sourceGroup = groups.find((group) => group.key === monthKey);
     if (!sourceGroup) return;
 
@@ -2760,16 +2906,29 @@ export default function Home() {
     options: AIGenerationOptions,
   ): Promise<string> => {
     const generationKey = `monthly-${monthKey}-${field}`;
-    const photos = form.appendices.dailyJournalMonthlySummaries[monthKey]?.photos || [];
-    if (!photos.length) {
-      throw new Error('Add at least one photo to this month before generating.');
+    const month = getMonthlyJournalGroups(
+      form.appendices.dailyJournal,
+      form.appendices.dailyJournalMonthlySummaries,
+    ).find((group) => group.key === monthKey);
+    if (!month) throw new Error(`Could not find ${monthLabel} in the monthly journal.`);
+    const summary = form.appendices.dailyJournalMonthlySummaries[monthKey] || {};
+    const photos = (summary.photos || []).slice(0, 4);
+    const activities = month.activities.slice(0, 40).map(({ weekNumber, activity }) => ({
+      weekNumber,
+      day: aiText(activity.day, 40),
+      date: aiText(activity.date, 60),
+      accomplishment: aiText(activity.accomplishment, 400),
+      hours: activity.hours,
+    })).filter((activity) => activity.accomplishment);
+    if (!activities.length && !photos.length && !options.focus.trim()) {
+      throw new Error(`Add daily activities, monthly photos, or generation details for ${monthLabel} before generating.`);
     }
     if (aiGenerating) {
       throw new Error('Another AI generation is already in progress. Wait for it to finish, then try again.');
     }
 
     setAiGenerating(generationKey);
-    setStatus(`Generating ${field === 'activitiesPerformed' ? 'monthly activities' : 'monthly learning'} from photos...`);
+    setStatus(`Generating ${field === 'activitiesPerformed' ? 'monthly activities' : 'monthly learning'} for ${monthLabel}...`);
 
     try {
       const response = await fetch('/api/ai/generate', {
@@ -2779,11 +2938,23 @@ export default function Home() {
           title: field === 'activitiesPerformed'
             ? 'Monthly Journal Activities Performed'
             : 'Monthly Journal Learning Experience',
-          imageData: photos.map((photo) => photo.base64),
+          ...(photos.length ? { imageData: photos.map((photo) => photo.base64) } : {}),
+          sourceDetails: {
+            monthlyJournal: [{
+              month: monthLabel,
+              periodCovered: summary.periodCovered || month.periodCovered,
+              actualDutyDays: summary.actualDutyDays || month.actualDutyDays,
+              totalHoursRendered: summary.totalHoursRendered || month.totalHoursRendered,
+              activitiesPerformed: aiText(summary.activitiesPerformed || '', 1500),
+              learningExperience: aiText(summary.learningExperience || '', 1500),
+              activities,
+            }],
+          },
+          currentText: aiText(summary[field] || '', 4000),
           focus: aiText(options.focus, 2000),
           instructions: field === 'activitiesPerformed'
-            ? `Write a concise monthly Activities Performed narrative for ${monthLabel}. Use the user's focus as the main points and factual account of what they did; use the uploaded photos to add relevant visible context. Do not invent dates, duties, or results not provided in the focus or photos.`
-            : `Write a concise monthly Learning / Experience narrative for ${monthLabel}. Include the user's focus as their account of what they learned or experienced, and use the uploaded photos for relevant context. Do not infer personal learning, feelings, skills, or growth from photos alone or invent details beyond the user's focus and photos.`,
+            ? `Write the ${monthLabel} Activities Performed section using only the supplied ${monthLabel} daily entries, existing monthly summary, user focus, and that month's selected photos. Summarize actual recorded tasks; never use activities from another month or infer undocumented actions, outcomes, or dates.`
+            : `Write the ${monthLabel} Learning / Experience section using only the supplied ${monthLabel} monthly summary, user focus, daily entries, and that month's photos. Do not infer personal learning, feelings, skills, or growth from tasks or photos alone. Use learning or experience only when the user explicitly states it; otherwise ask for the missing reflection. Never use details from another month.`,
           outputUnit: options.unit,
           outputCount: options.count,
         }),
@@ -2799,7 +2970,7 @@ export default function Home() {
         throw new Error('The AI service returned no text. Please try again.');
       }
 
-      setStatus(`${field === 'activitiesPerformed' ? 'Activities Performed' : 'Learning / Experience'} drafted. Review and edit the text.`);
+      setStatus(`${monthLabel} ${field === 'activitiesPerformed' ? 'Activities Performed' : 'Learning / Experience'} drafted. Review and edit the text.`);
       return result.text.trim();
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Could not generate the monthly journal text.';
@@ -3174,6 +3345,164 @@ export default function Home() {
               <button
                 type="button"
                 onClick={() => setAiDrafts((previous) => previous.map((draft) => ({ ...draft, selected: true })))}
+      {monthlyPhotoSelection && (
+        <div
+          className="fixed inset-0 z-[1600] flex items-center justify-center bg-slate-950/85 p-2 backdrop-blur-sm sm:p-6"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="monthly-photo-selection-title"
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') setMonthlyPhotoSelection(null);
+          }}
+        >
+          <div className="flex max-h-[calc(100dvh-1rem)] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl sm:max-h-[calc(100dvh-3rem)] sm:rounded-3xl">
+            <header className="border-b border-slate-800 p-4 sm:p-6">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-300">Monthly Journal Photos</p>
+              <h2 id="monthly-photo-selection-title" className="mt-1 text-xl font-bold text-white">Choose the photos for your monthly layout</h2>
+              <p className="mt-2 text-sm text-slate-300">
+                Daily entries are automatically grouped by their dates, and the month summaries are kept separate. Select 2–4 photos for each month when enough are available. Activities Performed and Learning / Experience can also be generated from that month’s entries without photos.
+              </p>
+              <div className="mt-3 rounded-xl border border-cyan-500/20 bg-cyan-500/[0.06] p-3">
+                <p className="text-xs font-semibold text-cyan-100">
+                  Detected {monthlyPhotoSelection.groups.filter((group) => group.activityCount > 0).length} month group(s) from daily journal entries
+                </p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {monthlyPhotoSelection.groups.filter((group) => group.activityCount > 0).map((group) => (
+                    <span key={group.key} className="rounded-full border border-slate-700 bg-slate-950/70 px-2.5 py-1 text-[11px] text-slate-200">
+                      {group.label}: {group.activityCount} entr{group.activityCount === 1 ? 'y' : 'ies'}
+                      {group.periodCovered ? ` · ${group.periodCovered}` : ''}
+                    </span>
+                  ))}
+                </div>
+                {monthlyPhotoSelection.groups.some((group) => group.key === 'month-not-set' && group.activityCount > 0) && (
+                  <p className="mt-2 text-xs text-amber-200">
+                    Some entries have blank or unrecognized dates and are grouped under MONTH NOT SET. Correct those dates in the daily journal to assign them to a month.
+                  </p>
+                )}
+              </div>
+              <label className="mt-4 block text-xs font-semibold text-slate-300">
+                What kind of pictures do you want to show? (optional)
+                <input
+                  type="text"
+                  value={monthlyPhotoSelection.preference}
+                  onChange={(event) => setMonthlyPhotoSelection((current) => current
+                    ? { ...current, preference: event.target.value, error: '' }
+                    : current)}
+                  placeholder="For example: equipment setup, completed tasks, or group activities"
+                  className="mt-1.5 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-slate-100 placeholder:text-slate-500 focus:border-cyan-400 focus:outline-none"
+                />
+                <span className="mt-1 block font-normal text-slate-500">
+                  The preference filters captions and activity details to help you find matching photos; you choose the final pictures yourself.
+                </span>
+              </label>
+            </header>
+            <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4 sm:p-6">
+              {monthlyPhotoSelection.groups.map((group) => {
+                const selectedIds = new Set(group.selectedIds);
+                const preferenceWords = monthlyPhotoSelection.preference
+                  .toLowerCase()
+                  .split(/\s+/)
+                  .filter(Boolean);
+                const visibleCandidates = group.candidates.filter((candidate) => {
+                  const searchableText = `${candidate.description} ${candidate.photo.detail}`.toLowerCase();
+                  return preferenceWords.every((word) => searchableText.includes(word));
+                });
+                const minimum = Math.min(2, group.candidates.length);
+                return (
+                  <section key={group.key} className="rounded-xl border border-slate-700 bg-slate-950/50 p-3 sm:p-4">
+                    <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                      <h3 className="font-bold text-white">{group.label}</h3>
+                      <span className="text-xs text-slate-400">
+                        {group.activityCount > 0
+                          ? `${group.activityCount} daily entr${group.activityCount === 1 ? 'y' : 'ies'}${group.periodCovered ? ` · ${group.periodCovered}` : ''} · `
+                          : 'No daily entries · '}
+                        {group.candidates.length
+                          ? `selected ${group.selectedIds.length}, choose ${minimum}–${Math.min(4, group.candidates.length)} photos`
+                          : 'no photos available'}
+                      </span>
+                    </div>
+                    {group.candidates.length === 0 ? (
+                      <p className="text-sm text-amber-200">
+                        No daily photos are available for this month. You can continue and upload monthly photos after switching layouts.
+                      </p>
+                    ) : visibleCandidates.length === 0 ? (
+                      <p className="text-sm text-slate-400">No photo captions or activity details match that preference. Clear or change the preference to see all photos.</p>
+                    ) : (
+                      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                        {visibleCandidates.map((candidate) => {
+                          const isSelected = selectedIds.has(candidate.id);
+                          const isAtLimit = group.selectedIds.length >= 4;
+                          return (
+                            <label
+                              key={candidate.id}
+                              className={`cursor-pointer overflow-hidden rounded-xl border transition ${
+                                isSelected ? 'border-cyan-400 ring-2 ring-cyan-500/30' : 'border-slate-700 hover:border-slate-500'
+                              } ${!isSelected && isAtLimit ? 'cursor-not-allowed opacity-50' : ''}`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                disabled={!isSelected && isAtLimit}
+                                onChange={() => setMonthlyPhotoSelection((current) => {
+                                  if (!current) return current;
+                                  return {
+                                    ...current,
+                                    error: '',
+                                    groups: current.groups.map((currentGroup) => {
+                                      if (currentGroup.key !== group.key) return currentGroup;
+                                      const currentSelected = new Set(currentGroup.selectedIds);
+                                      if (currentSelected.has(candidate.id)) currentSelected.delete(candidate.id);
+                                      else if (currentSelected.size < 4) currentSelected.add(candidate.id);
+                                      return { ...currentGroup, selectedIds: Array.from(currentSelected) };
+                                    }),
+                                  };
+                                })}
+                                className="sr-only"
+                              />
+                              <img
+                                src={candidate.photo.base64}
+                                alt={`Photo option for ${group.label}: ${candidate.description}`}
+                                className="h-36 w-full object-cover"
+                              />
+                              <span className="block p-2.5">
+                                <span className="block text-xs font-semibold text-slate-100">{candidate.description || candidate.photo.detail}</span>
+                                {candidate.id.startsWith('monthly:') && (
+                                  <span className="mt-1 block text-[10px] text-cyan-300">Existing monthly photo</span>
+                                )}
+                              </span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </section>
+                );
+              })}
+              {monthlyPhotoSelection.error && (
+                <p role="alert" className="rounded-lg border border-rose-400/30 bg-rose-950/40 p-3 text-sm text-rose-200">
+                  {monthlyPhotoSelection.error}
+                </p>
+              )}
+            </div>
+            <footer className="flex flex-col-reverse gap-3 border-t border-slate-800 p-4 sm:flex-row sm:justify-end sm:p-5">
+              <button
+                type="button"
+                onClick={() => setMonthlyPhotoSelection(null)}
+                className="min-h-11 rounded-xl border border-slate-700 px-4 text-sm font-semibold text-slate-200"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={saveMonthlyPhotoSelection}
+                className="min-h-11 rounded-xl bg-cyan-500 px-4 text-sm font-bold text-slate-950"
+              >
+                Use selected photos and switch layout
+              </button>
+            </footer>
+          </div>
+        </div>
+      )}
                 className="min-h-11 rounded-xl border border-slate-700 px-4 text-sm font-semibold text-slate-200"
               >
                 Select all fields
@@ -4234,19 +4563,19 @@ export default function Home() {
                       <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-400">Layout</span>
                       <div className="flex flex-wrap gap-2 sm:gap-3">
                         <label className="flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs text-slate-200">
-                          <input type="radio" name="daily-journal-layout" checked={form.appendices.dailyJournalLayout === 'current'} onChange={() => updateDailyJournalLayout('current')} className="accent-cyan-400" />
+                          <input type="radio" name="daily-journal-layout" checked={form.appendices.dailyJournalLayout === 'current'} onChange={() => handleDailyJournalLayoutChange('current')} className="accent-cyan-400" />
                           Weekly layout
                         </label>
                         <label className="flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs text-slate-200">
-                          <input type="radio" name="daily-journal-layout" checked={form.appendices.dailyJournalLayout === 'report'} onChange={() => updateDailyJournalLayout('report')} className="accent-cyan-400" />
+                          <input type="radio" name="daily-journal-layout" checked={form.appendices.dailyJournalLayout === 'report'} onChange={() => handleDailyJournalLayoutChange('report')} className="accent-cyan-400" />
                           Daily layout
                         </label>
                         <label className="flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs text-slate-200">
-                          <input type="radio" name="daily-journal-layout" checked={form.appendices.dailyJournalLayout === 'no-photo'} onChange={() => updateDailyJournalLayout('no-photo')} className="accent-cyan-400" />
+                          <input type="radio" name="daily-journal-layout" checked={form.appendices.dailyJournalLayout === 'no-photo'} onChange={() => handleDailyJournalLayoutChange('no-photo')} className="accent-cyan-400" />
                           No-picture layout
                         </label>
                         <label className="flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs text-slate-200">
-                          <input type="radio" name="daily-journal-layout" checked={form.appendices.dailyJournalLayout === 'monthly'} onChange={() => updateDailyJournalLayout('monthly')} className="accent-cyan-400" />
+                          <input type="radio" name="daily-journal-layout" checked={form.appendices.dailyJournalLayout === 'monthly'} onChange={() => handleDailyJournalLayoutChange('monthly')} className="accent-cyan-400" />
                           Monthly layout
                         </label>
                       </div>
@@ -4319,6 +4648,9 @@ export default function Home() {
                                   />
                                 )
                               )}
+                      <p className="rounded-xl border border-cyan-500/20 bg-cyan-500/[0.06] p-3 text-xs leading-5 text-cyan-100">
+                        Daily entries are grouped by their dates, and each month has its own Activities Performed and Learning / Experience fields. AI generation uses only the selected month’s entries, summary, and photos. For Learning / Experience, add what you personally learned in the generation focus; tasks and photos alone cannot confirm learning.
+                      </p>
                               <button
                                 type="button"
                                 onClick={() => removeMonthlyJournalMonth(month.key)}
@@ -4372,8 +4704,6 @@ export default function Home() {
                               placeholder="Summarize the activities performed during this month."
                               onGenerate={(options) => generateMonthlyJournalField(month.key, month.label, 'activitiesPerformed', options)}
                               generating={aiGenerating === `monthly-${month.key}-activitiesPerformed`}
-                              generateDisabled={!(form.appendices.dailyJournalMonthlySummaries[month.key]?.photos?.length)}
-                              generateDisabledMessage="Add at least one photo to this month to generate from its images."
                             />
                           </div>
                           <div>
@@ -4385,8 +4715,6 @@ export default function Home() {
                               placeholder="Describe what you learned or experienced this month."
                               onGenerate={(options) => generateMonthlyJournalField(month.key, month.label, 'learningExperience', options)}
                               generating={aiGenerating === `monthly-${month.key}-learningExperience`}
-                              generateDisabled={!(form.appendices.dailyJournalMonthlySummaries[month.key]?.photos?.length)}
-                              generateDisabledMessage="Add at least one photo to this month to generate from its images."
                             />
                           </div>
                           <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3 sm:p-4">
@@ -4484,6 +4812,9 @@ export default function Home() {
                                       type="button"
                                       onClick={() => openMobileAccomplishmentEditor(weekIdx, dayIdx, act.accomplishment)}
                                       aria-label={`Edit accomplishment for ${act.day || `Day ${dayIdx + 1}`}`}
+                              <span className="mt-1 block font-normal text-slate-400">
+                                These are the selected photos for this month’s report. Daily photos are copied here only after you select them.
+                              </span>
                                       className="flex min-h-11 w-full items-start justify-between gap-2 rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-2 text-left text-xs text-slate-100"
                                     >
                                       <span className="line-clamp-2 min-w-0 flex-1 whitespace-pre-wrap break-words">{act.accomplishment || 'Tap to add accomplishment'}</span>
