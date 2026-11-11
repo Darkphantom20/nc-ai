@@ -3449,9 +3449,6 @@ export default function Home() {
             <header className="border-b border-slate-800 p-4 sm:p-6">
               <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-300">Monthly Journal Photos</p>
               <h2 id="monthly-photo-selection-title" className="mt-1 text-xl font-bold text-white">Choose the photos for your monthly layout</h2>
-              <p className="mt-2 text-sm text-slate-300">
-                Daily entries are grouped by their dates. Switching layouts keeps the original daily entries and photos; only your monthly selections and summaries are updated here. Choose photos and, if useful, generate month-specific summaries from that month’s entries.
-              </p>
               <div className="mt-3 rounded-xl border border-cyan-500/20 bg-cyan-500/[0.06] p-3">
                 <p className="text-xs font-semibold text-cyan-100">
                   Detected {monthlyPhotoSelection.groups.filter((group) => group.activityCount > 0).length} month group(s) from daily journal entries
@@ -3481,9 +3478,6 @@ export default function Home() {
                   placeholder="For example: equipment setup, completed tasks, or group activities"
                   className="mt-1.5 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-slate-100 placeholder:text-slate-500 focus:border-cyan-400 focus:outline-none"
                 />
-                <span className="mt-1 block font-normal text-slate-500">
-                  The preference filters photos by their month-specific captions and activity details. Each month needs at least one selected photo.
-                </span>
               </label>
             </header>
             <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4 sm:p-6">
@@ -4834,9 +4828,6 @@ export default function Home() {
                         </button>
                       </div>
                     </div>
-                    <p className="text-xs text-slate-400">
-                      Import a Word journal table. Day text and photos are matched by their table row; you can review before applying the import.
-                    </p>
                     {journalImportError && (
                       <p role="alert" className="rounded-lg border border-rose-400/30 bg-rose-950/40 p-3 text-xs text-rose-200">
                         {journalImportError}
