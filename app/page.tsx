@@ -2274,7 +2274,7 @@ export default function Home() {
     const groups = getMonthlyJournalGroups(
       form.appendices.dailyJournal,
       form.appendices.dailyJournalMonthlySummaries,
-    ).map((month) => {
+    ).map((month): MonthlyPhotoSelectionGroup => {
       const candidates: MonthlyPhotoCandidate[] = [];
       const seenImages = new Set<string>();
       const summaryPhotos = form.appendices.dailyJournalMonthlySummaries[month.key]?.photos || [];
