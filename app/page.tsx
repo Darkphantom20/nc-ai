@@ -2343,14 +2343,81 @@ export default function Home() {
     const detectedMonths = groups.filter((group) => group.activityCount > 0);
     setStatus(
       detectedMonths.length
-        ? `Detected ${detectedMonths.length} journal month${detectedMonths.length === 1 ? '' : 's'} from daily entry dates. Review the month groups before switching layouts.`
+        ? form.appendices.dailyJournalLayout === 'monthly'
+          ? `Review or change photos for ${detectedMonths.length} journal month${detectedMonths.length === 1 ? '' : 's'}.`
+          : `Detected ${detectedMonths.length} journal month${detectedMonths.length === 1 ? '' : 's'} from daily entry dates. Review the month groups before switching layouts.`
         : 'No dated journal months detected. Add or correct daily dates to separate entries by month.',
     );
   };
 
   const handleDailyJournalLayoutChange = (layout: 'current' | 'report' | 'no-photo' | 'monthly') => {
     if (layout === 'monthly' && form.appendices.dailyJournalLayout !== 'monthly') {
-      openMonthlyPhotoSelection();
+      const monthlySummaries = { ...form.appendices.dailyJournalMonthlySummaries };
+      const usedImages = new Set<string>();
+      const monthGroups = getMonthlyJournalGroups(
+        form.appendices.dailyJournal,
+        form.appendices.dailyJournalMonthlySummaries,
+      ).filter((month) => /^\d{4}-\d{1,2}$|^unspecified-\d+$/.test(month.key));
+      let monthsWithPhotos = 0;
+
+      for (const month of monthGroups) {
+        const existingPhotos = monthlySummaries[month.key]?.photos || [];
+        const dailyPhotos = month.activities.flatMap(({ weekIndex, dayIndex, activity }) => {
+          const photo = getDailyJournalPhoto(
+            form.appendices.dailyJournal[weekIndex],
+            dayIndex,
+            form.appendices.dailyJournalLayout,
+          );
+          if (!photo) return [];
+          const detail = [
+            activity.date.trim(),
+            activity.day.trim(),
+            aiText(activity.accomplishment, 180),
+            aiText(photo.detail, 120),
+          ].filter(Boolean).join(' — ');
+          return [{ ...photo, detail }];
+        });
+        const photos = existingPhotos
+          .filter((photo) => photo.base64 && !usedImages.has(photo.base64))
+          .slice(0, 4);
+        if (photos.length === 0) {
+          const photo = dailyPhotos.find((candidate) => (
+            candidate.base64 && !usedImages.has(candidate.base64)
+          ));
+          if (photo) photos.push(photo);
+        }
+
+        photos.forEach((photo) => usedImages.add(photo.base64));
+        if (photos.length > 0) {
+          monthsWithPhotos += 1;
+        }
+        monthlySummaries[month.key] = {
+          ...monthlySummaries[month.key],
+          photos,
+        };
+      }
+
+      setForm((previous) => ({
+        ...previous,
+        appendices: {
+          ...previous.appendices,
+          dailyJournalLayout: 'monthly',
+          dailyJournalMonthlySummaries: {
+            ...previous.appendices.dailyJournalMonthlySummaries,
+            ...monthlySummaries,
+          },
+        },
+      }));
+      const monthsWithoutPhotos = monthGroups.length - monthsWithPhotos;
+      setStatus(
+        monthGroups.length === 0
+          ? 'Monthly layout selected, but no dated months were found. Add or correct journal dates to assign photos by month.'
+          : monthsWithPhotos === 0
+            ? `Monthly layout selected, but no dated photos were found for its ${monthGroups.length} month${monthGroups.length === 1 ? '' : 's'}.`
+            : monthsWithoutPhotos
+              ? `Monthly layout selected. Added photos to ${monthsWithPhotos} month${monthsWithPhotos === 1 ? '' : 's'}; ${monthsWithoutPhotos} month${monthsWithoutPhotos === 1 ? ' has' : 's have'} no dated photos.`
+              : `Monthly layout selected with photos for each of its ${monthGroups.length} month${monthGroups.length === 1 ? '' : 's'}.`,
+      );
       return;
     }
     updateDailyJournalLayout(layout);
@@ -2361,14 +2428,13 @@ export default function Home() {
 
     const invalidGroup = monthlyPhotoSelection.groups.find((group) => {
       if (!group.candidates.length) return false;
-      const minimum = Math.min(2, group.candidates.length);
-      return group.selectedIds.length < minimum || group.selectedIds.length > 4;
+      return group.selectedIds.length < 1 || group.selectedIds.length > 4;
     });
     if (invalidGroup) {
       setMonthlyPhotoSelection((current) => current
         ? {
             ...current,
-            error: `Select ${Math.min(2, invalidGroup.candidates.length)}–${Math.min(4, invalidGroup.candidates.length)} photos for ${invalidGroup.label}.`,
+            error: `Select at least one photo for ${invalidGroup.label}.`,
           }
         : current);
       return;
@@ -2395,7 +2461,11 @@ export default function Home() {
       };
     });
     setMonthlyPhotoSelection(null);
-    setStatus('Monthly layout selected with your chosen photos.');
+    setStatus(
+      form.appendices.dailyJournalLayout === 'monthly'
+        ? 'Monthly photo selections updated.'
+        : 'Monthly layout selected with your chosen photos.',
+    );
   };
 
   const updateMonthlyJournalSummary = (
@@ -3412,7 +3482,7 @@ export default function Home() {
                   className="mt-1.5 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-slate-100 placeholder:text-slate-500 focus:border-cyan-400 focus:outline-none"
                 />
                 <span className="mt-1 block font-normal text-slate-500">
-                  The preference filters captions and activity details to help you find matching photos; you choose the final pictures yourself.
+                  The preference filters photos by their month-specific captions and activity details. Each month needs at least one selected photo.
                 </span>
               </label>
             </header>
@@ -3427,7 +3497,7 @@ export default function Home() {
                   const searchableText = `${candidate.description} ${candidate.photo.detail}`.toLowerCase();
                   return preferenceWords.every((word) => searchableText.includes(word));
                 });
-                const minimum = Math.min(2, group.candidates.length);
+                const minimum = 1;
                 return (
                   <section key={group.key} className="rounded-xl border border-slate-700 bg-slate-950/50 p-3 sm:p-4">
                     <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -3663,7 +3733,9 @@ export default function Home() {
                 onClick={saveMonthlyPhotoSelection}
                 className="min-h-11 rounded-xl bg-cyan-500 px-4 text-sm font-bold text-slate-950"
               >
-                Use selected photos and switch layout
+                {form.appendices.dailyJournalLayout === 'monthly'
+                  ? 'Apply photo selections'
+                  : 'Use selected photos and switch layout'}
               </button>
             </footer>
           </div>
@@ -4795,6 +4867,18 @@ export default function Home() {
 
                   {form.appendices.dailyJournalLayout === 'monthly' ? (
                     <div className="space-y-5">
+                      <p className="rounded-xl border border-cyan-500/20 bg-cyan-500/[0.06] p-3 text-xs leading-5 text-cyan-100">
+                        When switching to this layout, each month keeps its existing photos or receives one dated photo from that same month. Months without a dated photo stay empty; photos are never borrowed from another month. You can review or change the selections below. AI generation uses only the selected month’s entries, summary, and photos. For Learning / Experience, add what you personally learned in the generation focus; tasks and photos alone cannot confirm learning.
+                      </p>
+                      <div className="flex justify-end">
+                        <button
+                          type="button"
+                          onClick={openMonthlyPhotoSelection}
+                          className="min-h-10 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 text-xs font-semibold text-cyan-200 transition hover:bg-cyan-500/20"
+                        >
+                          Review or change monthly photos
+                        </button>
+                      </div>
                       {getMonthlyJournalGroups(
                         form.appendices.dailyJournal,
                         form.appendices.dailyJournalMonthlySummaries,
@@ -4859,10 +4943,7 @@ export default function Home() {
                                   />
                                 )
                               )}
-                      <p className="rounded-xl border border-cyan-500/20 bg-cyan-500/[0.06] p-3 text-xs leading-5 text-cyan-100">
-                        Daily entries are grouped by their dates, and each month has its own Activities Performed and Learning / Experience fields. AI generation uses only the selected month’s entries, summary, and photos. For Learning / Experience, add what you personally learned in the generation focus; tasks and photos alone cannot confirm learning.
-                      </p>
-                              <button
+                                <button
                                 type="button"
                                 onClick={() => removeMonthlyJournalMonth(month.key)}
                                 disabled={!canManageMonth}
@@ -4932,7 +5013,7 @@ export default function Home() {
                             <label className="block text-xs font-semibold text-slate-300">
                               Monthly Photo Documentation (Max 4)
                               <span className="mt-1 block font-normal text-slate-400">
-                                These are the selected photos for this month’s report. Daily photos are copied here only after you select them.
+                                If this month has no existing monthly photos, one photo from its dated entries is selected automatically. You can add or remove photos for this month here.
                               </span>
                               <input
                                 type="file"
