@@ -219,9 +219,6 @@ type NarrativeDailyActivity = {
 
 type JournalPhoto = { base64: string; detail: string };
 
-type NarrativeJournalWeek = {
-  weekNumber: number;
-  totalHours: number | string;
 type MonthlyPhotoCandidate = {
   id: string;
   photo: JournalPhoto;
@@ -244,6 +241,9 @@ type MonthlyPhotoSelection = {
   error: string;
 };
 
+type NarrativeJournalWeek = {
+  weekNumber: number;
+  totalHours: number | string;
   narrative: string;
   activities: NarrativeDailyActivity[];
   images?: (JournalPhoto | null)[];
@@ -1631,6 +1631,7 @@ export default function Home() {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState('');
   const [previewZoom, setPreviewZoom] = useState(0.3);
+  const [monthlyPhotoSelection, setMonthlyPhotoSelection] = useState<MonthlyPhotoSelection | null>(null);
   const [mobileAccomplishmentEditor, setMobileAccomplishmentEditor] = useState<{
     weekIndex: number;
     dayIndex: number;
@@ -1664,7 +1665,6 @@ export default function Home() {
 
     const interval = window.setInterval(() => {
       setCompletionSlideIndex((prev) => (prev === 0 ? 1 : 0));
-  const [monthlyPhotoSelection, setMonthlyPhotoSelection] = useState<MonthlyPhotoSelection | null>(null);
     }, 3000);
 
     return () => window.clearInterval(interval);
