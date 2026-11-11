@@ -170,7 +170,7 @@ const defaultForm = {
     organizationStructureImage: ''
   },
   appendices: {
-    dailyJournalLayout: 'current',
+    dailyJournalLayout: 'report',
     dailyJournalMonthlySummaries: {} as Record<string, MonthlyJournalSummary>,
     reportFooter: {
       preparedByLabel: 'Prepared By:',
