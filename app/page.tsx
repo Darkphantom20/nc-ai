@@ -279,6 +279,20 @@ function normalizeDailyJournalDays(journal: NarrativeJournalWeek[]): NarrativeJo
   }));
 }
 
+function removeLeadingEmptyJournalWeeks(journal: NarrativeJournalWeek[]): NarrativeJournalWeek[] {
+  const firstPopulatedWeek = journal.findIndex((week) => (
+    week.narrative.trim()
+    || week.activities.some((activity) => activity.date.trim() || activity.accomplishment.trim())
+    || [week.images, week.currentLayoutImages, week.reportLayoutImages]
+      .some((images) => images?.some((image) => Boolean(image?.base64)))
+  ));
+  if (firstPopulatedWeek <= 0) return journal;
+  return journal.slice(firstPopulatedWeek).map((week, index) => ({
+    ...week,
+    weekNumber: index + 1,
+  }));
+}
+
 function moveJournalDateToMonth(
   date: string,
   oldMonthIndex: number,
@@ -757,6 +771,10 @@ function mergeNarrativeForm(parsedForm: Record<string, unknown>): NarrativeForm 
 
   return {
     ...mergedForm,
+    appendices: {
+      ...mergedForm.appendices,
+      dailyJournal: removeLeadingEmptyJournalWeeks(mergedForm.appendices.dailyJournal),
+    },
     tableOfContents: syncSchoolPlacementTOC(mergedForm.tableOfContents, mergedForm.schoolPlacement.enabled)
   };
 }
