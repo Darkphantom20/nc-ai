@@ -403,7 +403,6 @@ function getMonthlyJournalAIContext(form: NarrativeForm): Record<string, unknown
       const activities = month.activities.flatMap(({ weekNumber, activity }) => {
         const accomplishment = aiText(activity.accomplishment, 200);
         const key = JSON.stringify([
-  let includeMonthlyJournal = false;
           weekNumber,
           aiText(activity.day, 40),
           aiText(activity.date, 40),
@@ -414,10 +413,8 @@ function getMonthlyJournalAIContext(form: NarrativeForm): Record<string, unknown
         return [{
           weekNumber,
           day: aiText(activity.day, 40),
-    includeMonthlyJournal = true;
           date: aiText(activity.date, 40),
           accomplishment,
-    includeMonthlyJournal = true;
           hours: activity.hours,
         }];
       }).slice(0, 3);
@@ -466,8 +463,7 @@ function buildAISectionContext(form: NarrativeForm, targetKey: AiGenerationField
   const caseFields: AiNarrativeFieldKey[] = ['issue1', 'issue1Action', 'issue2', 'issue2Action'];
   let contextFields: AiNarrativeFieldKey[];
   let includeJournal = false;
-
-    ...(includeMonthlyJournal ? { monthlyJournal: getMonthlyJournalAIContext(form) } : {}),
+  let includeMonthlyJournal = false;
   if (targetKey === 'acknowledgement' || targetKey === 'lessons'
     || targetKey === 'selfEvaluation' || targetKey === 'relevancy') {
     contextFields = [...taskFields, ...caseFields, 'lessons', 'selfEvaluation', 'relevancy'];
@@ -478,9 +474,11 @@ function buildAISectionContext(form: NarrativeForm, targetKey: AiGenerationField
   } else if (targetKey === 'issue1' || targetKey === 'issue2') {
     contextFields = [...taskFields, ...(targetKey === 'issue2' ? ['issue1' as const] : [])];
     includeJournal = true;
+    includeMonthlyJournal = true;
   } else if (targetKey === 'issue1Action' || targetKey === 'issue2Action') {
     contextFields = [...taskFields, targetKey === 'issue1Action' ? 'issue1' : 'issue2'];
     includeJournal = true;
+    includeMonthlyJournal = true;
   } else if (organizationAnalysisFields.includes(targetKey)) {
     contextFields = [...organizationFields, ...organizationAnalysisFields];
   } else {
@@ -531,6 +529,7 @@ function buildAISectionContext(form: NarrativeForm, targetKey: AiGenerationField
 
   return {
     weeklyJournal,
+    ...(includeMonthlyJournal ? { monthlyJournal: getMonthlyJournalAIContext(form) } : {}),
     ...(organization ? { trainingOrganization: organization } : {}),
     ...(location ? { trainingLocation: location } : {}),
     ...(degreeProgram ? { degreeProgram } : {}),
