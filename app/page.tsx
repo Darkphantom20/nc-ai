@@ -3301,49 +3301,6 @@ export default function Home() {
 
   return (
     <main className="min-h-screen min-w-0 overflow-x-hidden bg-slate-950 px-3 sm:px-4 md:px-6 lg:px-8 py-6 pb-24 sm:py-8 sm:pb-8 md:py-12 text-slate-100">
-      {showAiDraftReview && (
-        <div
-          className="fixed inset-0 z-[1500] flex items-center justify-center bg-slate-950/85 p-3 backdrop-blur-sm sm:p-6"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="ai-draft-title"
-        >
-          <div className="flex max-h-[92vh] w-full max-w-4xl flex-col rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl sm:rounded-3xl">
-            <div className="border-b border-slate-800 p-4 sm:p-6">
-              <h2 id="ai-draft-title" className="text-xl font-bold text-white">Review AI-drafted report text</h2>
-              <p className="mt-2 text-sm text-slate-300">
-                Review and edit each draft before applying it. Uncheck any field you want to keep unchanged.
-              </p>
-            </div>
-            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4 sm:p-6">
-              {aiDrafts.map((draft, index) => (
-                <section key={`${draft.scope}-${draft.key}`} className="rounded-xl border border-slate-700 bg-slate-950/70 p-3 sm:p-4">
-                  <label className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-200">
-                    <input
-                      type="checkbox"
-                      checked={draft.selected}
-                      onChange={(event) => setAiDrafts((previous) => previous.map((item, itemIndex) => (
-                        itemIndex === index ? { ...item, selected: event.target.checked } : item
-                      )))}
-                      className="h-4 w-4 accent-cyan-400"
-                    />
-                    <span>{draft.scope === 'schoolPlacement' ? 'School placement · ' : ''}{draft.label}</span>
-                  </label>
-                  <textarea
-                    value={draft.value}
-                    onChange={(event) => setAiDrafts((previous) => previous.map((item, itemIndex) => (
-                      itemIndex === index ? { ...item, value: event.target.value } : item
-                    )))}
-                    rows={3}
-                    className="w-full resize-y rounded-xl border border-slate-700 bg-slate-900 px-3 py-2.5 text-sm leading-6 text-slate-100 focus:border-cyan-400 focus:outline-none focus:ring-2 focus:ring-cyan-500/30"
-                  />
-                </section>
-              ))}
-            </div>
-            <div className="flex flex-col-reverse gap-3 border-t border-slate-800 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-6">
-              <button
-                type="button"
-                onClick={() => setAiDrafts((previous) => previous.map((draft) => ({ ...draft, selected: true })))}
       {monthlyPhotoSelection && (
         <div
           className="fixed inset-0 z-[1600] flex items-center justify-center bg-slate-950/85 p-2 backdrop-blur-sm sm:p-6"
@@ -3502,6 +3459,51 @@ export default function Home() {
           </div>
         </div>
       )}
+
+      {showAiDraftReview && (
+        <div
+          className="fixed inset-0 z-[1500] flex items-center justify-center bg-slate-950/85 p-3 backdrop-blur-sm sm:p-6"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="ai-draft-title"
+        >
+          <div className="flex max-h-[92vh] w-full max-w-4xl flex-col rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl sm:rounded-3xl">
+            <div className="border-b border-slate-800 p-4 sm:p-6">
+              <h2 id="ai-draft-title" className="text-xl font-bold text-white">Review AI-drafted report text</h2>
+              <p className="mt-2 text-sm text-slate-300">
+                Review and edit each draft before applying it. Uncheck any field you want to keep unchanged.
+              </p>
+            </div>
+            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4 sm:p-6">
+              {aiDrafts.map((draft, index) => (
+                <section key={`${draft.scope}-${draft.key}`} className="rounded-xl border border-slate-700 bg-slate-950/70 p-3 sm:p-4">
+                  <label className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-200">
+                    <input
+                      type="checkbox"
+                      checked={draft.selected}
+                      onChange={(event) => setAiDrafts((previous) => previous.map((item, itemIndex) => (
+                        itemIndex === index ? { ...item, selected: event.target.checked } : item
+                      )))}
+                      className="h-4 w-4 accent-cyan-400"
+                    />
+                    <span>{draft.scope === 'schoolPlacement' ? 'School placement · ' : ''}{draft.label}</span>
+                  </label>
+                  <textarea
+                    value={draft.value}
+                    onChange={(event) => setAiDrafts((previous) => previous.map((item, itemIndex) => (
+                      itemIndex === index ? { ...item, value: event.target.value } : item
+                    )))}
+                    rows={3}
+                    className="w-full resize-y rounded-xl border border-slate-700 bg-slate-900 px-3 py-2.5 text-sm leading-6 text-slate-100 focus:border-cyan-400 focus:outline-none focus:ring-2 focus:ring-cyan-500/30"
+                  />
+                </section>
+              ))}
+            </div>
+            <div className="flex flex-col-reverse gap-3 border-t border-slate-800 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-6">
+              <button
+                type="button"
+                onClick={() => setAiDrafts((previous) => previous.map((draft) => ({ ...draft, selected: true })))}
+
                 className="min-h-11 rounded-xl border border-slate-700 px-4 text-sm font-semibold text-slate-200"
               >
                 Select all fields
