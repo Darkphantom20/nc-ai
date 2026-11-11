@@ -233,6 +233,11 @@ type MonthlyPhotoSelectionGroup = {
   periodCovered: string;
   candidates: MonthlyPhotoCandidate[];
   selectedIds: string[];
+  generationFocus: string;
+  generationUnit: AIGenerationLength['unit'];
+  generationCount: number;
+  drafts: Partial<Record<'activitiesPerformed' | 'learningExperience', string>>;
+  generationError: string;
 };
 
 type MonthlyPhotoSelection = {
@@ -2322,6 +2327,11 @@ export default function Home() {
         selectedIds: candidates
           .filter((candidate) => candidate.id.startsWith(`monthly:${month.key}:`))
           .map((candidate) => candidate.id),
+        generationFocus: '',
+        generationUnit: 'paragraphs',
+        generationCount: 1,
+        drafts: {},
+        generationError: '',
       };
     });
 
@@ -2903,6 +2913,7 @@ export default function Home() {
     monthLabel: string,
     field: 'activitiesPerformed' | 'learningExperience',
     options: AIGenerationOptions,
+    selectedPhotos?: JournalPhoto[],
   ): Promise<string> => {
     const generationKey = `monthly-${monthKey}-${field}`;
     const month = getMonthlyJournalGroups(
@@ -2911,7 +2922,7 @@ export default function Home() {
     ).find((group) => group.key === monthKey);
     if (!month) throw new Error(`Could not find ${monthLabel} in the monthly journal.`);
     const summary = form.appendices.dailyJournalMonthlySummaries[monthKey] || {};
-    const photos = (summary.photos || []).slice(0, 4);
+    const photos = (selectedPhotos || summary.photos || []).slice(0, 4);
     const activities = month.activities.slice(0, 40).map(({ weekNumber, activity }) => ({
       weekNumber,
       day: aiText(activity.day, 40),
@@ -2946,6 +2957,7 @@ export default function Home() {
               totalHoursRendered: summary.totalHoursRendered || month.totalHoursRendered,
               activitiesPerformed: aiText(summary.activitiesPerformed || '', 1500),
               learningExperience: aiText(summary.learningExperience || '', 1500),
+              photoDetails: photos.map((photo) => aiText(photo.detail, 400)).filter(Boolean),
               activities,
             }],
           },
@@ -2977,6 +2989,58 @@ export default function Home() {
       throw new Error(message);
     } finally {
       setAiGenerating('');
+    }
+  };
+
+  const generateMonthlyPhotoSelectionDraft = async (
+    monthKey: string,
+    field: 'activitiesPerformed' | 'learningExperience',
+  ) => {
+    const group = monthlyPhotoSelection?.groups.find((item) => item.key === monthKey);
+    if (!group) return;
+
+    try {
+      const selectedIds = new Set(group.selectedIds);
+      const selectedPhotos = group.candidates
+        .filter((candidate) => selectedIds.has(candidate.id))
+        .map((candidate) => candidate.photo);
+      const draft = await generateMonthlyJournalField(
+        group.key,
+        group.label,
+        field,
+        {
+          focus: group.generationFocus,
+          unit: group.generationUnit,
+          count: group.generationCount,
+        },
+        selectedPhotos,
+      );
+      setMonthlyPhotoSelection((current) => current
+        ? {
+            ...current,
+            groups: current.groups.map((currentGroup) => (
+              currentGroup.key === monthKey
+                ? {
+                    ...currentGroup,
+                    drafts: { ...currentGroup.drafts, [field]: draft },
+                    generationError: '',
+                  }
+                : currentGroup
+            )),
+          }
+        : current);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not generate the monthly journal text.';
+      setMonthlyPhotoSelection((current) => current
+        ? {
+            ...current,
+            groups: current.groups.map((currentGroup) => (
+              currentGroup.key === monthKey
+                ? { ...currentGroup, generationError: message }
+                : currentGroup
+            )),
+          }
+        : current);
     }
   };
 
@@ -3316,7 +3380,7 @@ export default function Home() {
               <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-300">Monthly Journal Photos</p>
               <h2 id="monthly-photo-selection-title" className="mt-1 text-xl font-bold text-white">Choose the photos for your monthly layout</h2>
               <p className="mt-2 text-sm text-slate-300">
-                Daily entries are automatically grouped by their dates, and the month summaries are kept separate. Select 2–4 photos for each month when enough are available. Activities Performed and Learning / Experience can also be generated from that month’s entries without photos.
+                Daily entries are grouped by their dates. Switching layouts keeps the original daily entries and photos; only your monthly selections and summaries are updated here. Choose photos and, if useful, generate month-specific summaries from that month’s entries.
               </p>
               <div className="mt-3 rounded-xl border border-cyan-500/20 bg-cyan-500/[0.06] p-3">
                 <p className="text-xs font-semibold text-cyan-100">
@@ -3409,7 +3473,12 @@ export default function Home() {
                                       const currentSelected = new Set(currentGroup.selectedIds);
                                       if (currentSelected.has(candidate.id)) currentSelected.delete(candidate.id);
                                       else if (currentSelected.size < 4) currentSelected.add(candidate.id);
-                                      return { ...currentGroup, selectedIds: Array.from(currentSelected) };
+                                      return {
+                                        ...currentGroup,
+                                        selectedIds: Array.from(currentSelected),
+                                        drafts: {},
+                                        generationError: '',
+                                      };
                                     }),
                                   };
                                 })}
@@ -3431,6 +3500,147 @@ export default function Home() {
                         })}
                       </div>
                     )}
+                    <div className="mt-4 space-y-3 border-t border-slate-800 pt-4">
+                      <label className="block text-xs font-semibold text-slate-300">
+                        Optional AI focus for {group.label}
+                        <input
+                          type="text"
+                          value={group.generationFocus}
+                          disabled={Boolean(aiGenerating)}
+                          onChange={(event) => setMonthlyPhotoSelection((current) => current
+                            ? {
+                                ...current,
+                                groups: current.groups.map((currentGroup) => (
+                                  currentGroup.key === group.key
+                                    ? {
+                                        ...currentGroup,
+                                        generationFocus: event.target.value,
+                                        drafts: {},
+                                        generationError: '',
+                                      }
+                                    : currentGroup
+                                )),
+                              }
+                            : current)}
+                          placeholder="Add this month’s details or reflection (optional)"
+                          className="mt-1.5 w-full rounded-xl border border-violet-400/25 bg-violet-500/[0.06] px-3 py-2.5 text-sm text-slate-100 placeholder:text-slate-500 focus:border-violet-400 focus:outline-none"
+                        />
+                      </label>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <label className="block text-xs font-semibold text-slate-300">
+                          Output type
+                          <select
+                            value={group.generationUnit}
+                            disabled={Boolean(aiGenerating)}
+                            onChange={(event) => setMonthlyPhotoSelection((current) => current
+                              ? {
+                                  ...current,
+                                  groups: current.groups.map((currentGroup) => (
+                                    currentGroup.key === group.key
+                                      ? {
+                                          ...currentGroup,
+                                          generationUnit: event.target.value === 'sentences' ? 'sentences' : 'paragraphs',
+                                          drafts: {},
+                                        }
+                                      : currentGroup
+                                  )),
+                                }
+                              : current)}
+                            className="mt-1.5 min-h-11 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 text-sm text-slate-100"
+                          >
+                            <option value="paragraphs">Paragraphs</option>
+                            <option value="sentences">Sentences</option>
+                          </select>
+                        </label>
+                        <label className="block text-xs font-semibold text-slate-300">
+                          Number of {group.generationUnit}
+                          <select
+                            value={group.generationCount}
+                            disabled={Boolean(aiGenerating)}
+                            onChange={(event) => setMonthlyPhotoSelection((current) => current
+                              ? {
+                                  ...current,
+                                  groups: current.groups.map((currentGroup) => (
+                                    currentGroup.key === group.key
+                                      ? {
+                                          ...currentGroup,
+                                          generationCount: Number(event.target.value),
+                                          drafts: {},
+                                        }
+                                      : currentGroup
+                                  )),
+                                }
+                              : current)}
+                            className="mt-1.5 min-h-11 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 text-sm text-slate-100"
+                          >
+                            {Array.from({ length: 10 }, (_, index) => index + 1).map((count) => (
+                              <option key={count} value={count}>{count}</option>
+                            ))}
+                          </select>
+                        </label>
+                      </div>
+                      <div className="grid gap-3 lg:grid-cols-2">
+                        {([
+                          { field: 'activitiesPerformed', label: 'Activities Performed' },
+                          { field: 'learningExperience', label: 'Learning / Experience' },
+                        ] as const).map(({ field, label }) => (
+                          <div key={field} className="space-y-2 rounded-xl border border-slate-800 bg-slate-900/60 p-3">
+                            <button
+                              type="button"
+                              onClick={() => void generateMonthlyPhotoSelectionDraft(group.key, field)}
+                              disabled={Boolean(aiGenerating)}
+                              className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-violet-400/30 bg-violet-500/10 px-3 text-sm font-semibold text-violet-200 transition hover:bg-violet-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              <Sparkles size={15} aria-hidden="true" />
+                              {aiGenerating === `monthly-${group.key}-${field}` ? 'Generating...' : `Generate ${label} with AI`}
+                            </button>
+                            {group.drafts[field] !== undefined && (
+                              <>
+                                <label className="block text-xs font-semibold text-slate-300">
+                                  Review and edit {group.label} · {label}
+                                  <textarea
+                                    value={group.drafts[field]}
+                                    onChange={(event) => setMonthlyPhotoSelection((current) => current
+                                      ? {
+                                          ...current,
+                                          groups: current.groups.map((currentGroup) => (
+                                            currentGroup.key === group.key
+                                              ? {
+                                                  ...currentGroup,
+                                                  drafts: {
+                                                    ...currentGroup.drafts,
+                                                    [field]: event.target.value,
+                                                  },
+                                                }
+                                              : currentGroup
+                                          )),
+                                        }
+                                      : current)}
+                                    rows={4}
+                                    className="mt-1.5 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm leading-6 text-slate-100"
+                                  />
+                                </label>
+                                <button
+                                  type="button"
+                                  onClick={() => updateMonthlyJournalSummary(group.key, field, group.drafts[field] || '')}
+                                  className="min-h-10 rounded-lg bg-cyan-500 px-3 text-xs font-bold text-slate-950"
+                                >
+                                  Use this draft for {group.label}
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                      {group.generationError && (
+                        <p role="alert" className="rounded-lg border border-rose-400/30 bg-rose-950/40 p-3 text-sm text-rose-200">
+                          {group.generationError}
+                        </p>
+                      )}
+                      <p className="text-[11px] leading-5 text-slate-400">
+                        AI uses only {group.label} daily entries, this month’s selected photos, its monthly summary, and your focus. Tasks or photos alone are not treated as proof of personal learning.
+                      </p>
+                    </div>
                   </section>
                 );
               })}
