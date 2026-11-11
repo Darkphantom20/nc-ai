@@ -4867,9 +4867,6 @@ export default function Home() {
 
                   {form.appendices.dailyJournalLayout === 'monthly' ? (
                     <div className="space-y-5">
-                      <p className="rounded-xl border border-cyan-500/20 bg-cyan-500/[0.06] p-3 text-xs leading-5 text-cyan-100">
-                        When switching to this layout, each month keeps its existing photos or receives one dated photo from that same month. Months without a dated photo stay empty; photos are never borrowed from another month. You can review or change the selections below. AI generation uses only the selected month’s entries, summary, and photos. For Learning / Experience, add what you personally learned in the generation focus; tasks and photos alone cannot confirm learning.
-                      </p>
                       <div className="flex justify-end">
                         <button
                           type="button"
