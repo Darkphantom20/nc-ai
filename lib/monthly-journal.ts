@@ -40,20 +40,82 @@ export const MONTH_NAMES = [
   'July', 'August', 'September', 'October', 'November', 'December',
 ];
 
-function getActivityMonth(date: string): { monthIndex: number; year: string } | null {
-  const namedMonthIndex = MONTH_NAMES.findIndex((month) => (
-    new RegExp(`\\b${month}\\b|\\b${month.slice(0, 3)}\\b`, 'i').test(date)
-  ));
-  const year = date.match(/\b(?:19|20)\d{2}\b/)?.[0] || '';
-  if (namedMonthIndex >= 0) return { monthIndex: namedMonthIndex, year };
+export function normalizeJournalDate(date: string, fallbackYear?: number): string | null {
+  const trimmedDate = date.trim();
+  if (!trimmedDate) return null;
 
-  const numericDate = date.match(/\b(?:(\d{4})[-/](\d{1,2})[-/]\d{1,2}|(\d{1,2})[-/]\d{1,2}(?:[-/](\d{2,4}))?)\b/);
+  const isoDate = trimmedDate.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+  if (isoDate) {
+    return makeIsoDate(Number(isoDate[1]), Number(isoDate[2]), Number(isoDate[3]));
+  }
+
+  const numericDate = trimmedDate.match(/^(\d{1,2})[-/](\d{1,2})(?:[-/](\d{2,4}))?$/);
+  if (numericDate) {
+    const year = numericDate[3]
+      ? normalizeJournalYear(Number(numericDate[3]))
+      : fallbackYear;
+    if (!year) return null;
+    return makeIsoDate(year, Number(numericDate[1]), Number(numericDate[2]));
+  }
+
+  const monthIndex = MONTH_NAMES.findIndex((month) => (
+    new RegExp(`\\b${month}\\b|\\b${month.slice(0, 3)}\\b`, 'i').test(trimmedDate)
+  ));
+  if (monthIndex < 0) return null;
+
+  const yearMatch = trimmedDate.match(/\b(?:19|20)\d{2}\b/);
+  const year = yearMatch ? Number(yearMatch[0]) : fallbackYear;
+  if (!year) return null;
+
+  const day = trimmedDate
+    .match(/\b\d{1,2}\b/g)
+    ?.map(Number)
+    .find((number) => number >= 1 && number <= 31);
+  if (!day) return null;
+  return makeIsoDate(year, monthIndex + 1, day);
+}
+
+function normalizeJournalYear(year: number): number {
+  return year < 100 ? (year < 50 ? 2000 + year : 1900 + year) : year;
+}
+
+function makeIsoDate(year: number, month: number, day: number): string | null {
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  if (
+    parsed.getUTCFullYear() !== year
+    || parsed.getUTCMonth() !== month - 1
+    || parsed.getUTCDate() !== day
+  ) {
+    return null;
+  }
+  return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+function getActivityMonth(date: string): { monthIndex: number; year: string } | null {
+  const trimmedDate = date.trim();
+  if (!trimmedDate) return null;
+
+  const namedMonthIndex = MONTH_NAMES.findIndex((month) => (
+    new RegExp(`\\b${month}\\b|\\b${month.slice(0, 3)}\\b`, 'i').test(trimmedDate)
+  ));
+  const year = trimmedDate.match(/\b(?:19|20)\d{2}\b/)?.[0] || '';
+  if (namedMonthIndex >= 0) {
+    const normalizedDate = normalizeJournalDate(trimmedDate, 2000);
+    if (!normalizedDate || Number(normalizedDate.slice(5, 7)) !== namedMonthIndex + 1) return null;
+    return { monthIndex: namedMonthIndex, year: year || '' };
+  }
+
+  const numericDate = trimmedDate.match(/\b(?:(\d{4})[-/](\d{1,2})[-/]\d{1,2}|(\d{1,2})[-/]\d{1,2}(?:[-/](\d{2,4}))?)\b/);
   if (!numericDate) return null;
-  const monthNumber = Number(numericDate[2] || numericDate[3]);
+  const normalizedDate = normalizeJournalDate(trimmedDate, 2000);
+  if (!normalizedDate) return null;
+  const monthNumber = Number(normalizedDate.slice(5, 7));
   if (monthNumber < 1 || monthNumber > 12) return null;
   return {
     monthIndex: monthNumber - 1,
-    year: numericDate[1] || numericDate[4] || '',
+    year: numericDate[1] || numericDate[4]
+      ? normalizedDate.slice(0, 4)
+      : '',
   };
 }
 
@@ -168,24 +230,41 @@ export function getMonthlyJournalGroups(
         : left.key.localeCompare(right.key, undefined, { numeric: true }))
     .map((group) => {
       const summary = summaries[group.key] || {};
-      const datedActivities = group.activities.filter(({ activity }) => activity.date.trim());
+      const yearMatch = group.key.match(/^(\d{4})-/);
+      const fallbackYear = yearMatch ? Number(yearMatch[1]) : 2000;
+      const datedActivities = group.activities.flatMap((entry) => {
+        const normalizedDate = normalizeJournalDate(entry.activity.date, fallbackYear);
+        return normalizedDate ? [{ ...entry, normalizedDate }] : [];
+      }).sort((left, right) => left.normalizedDate.localeCompare(right.normalizedDate));
       const uniqueDutyDates = new Set(
         group.activities
-          .filter(({ activity }) => (Number(activity.hours) || 0) > 0)
-          .map(({ activity, weekIndex, dayIndex }) => activity.date.trim().toLowerCase() || `${weekIndex}-${dayIndex}`),
+          .filter(({ activity }) => Number.isFinite(Number(activity.hours)) && Number(activity.hours) > 0)
+          .map(({ activity, weekIndex, dayIndex }) => (
+            normalizeJournalDate(activity.date, fallbackYear) || `${weekIndex}-${dayIndex}`
+          )),
       );
       const totalHours = group.activities.reduce(
-        (total, { activity }) => total + (Number(activity.hours) || 0),
+        (total, { activity }) => {
+          const hours = Number(activity.hours);
+          return total + (Number.isFinite(hours) && hours > 0 ? hours : 0);
+        },
         0,
       );
-      const firstDate = datedActivities[0]?.activity.date.trim() || '';
-      const lastDate = datedActivities[datedActivities.length - 1]?.activity.date.trim() || '';
+      const firstDatedActivity = datedActivities[0];
+      const lastDatedActivity = datedActivities[datedActivities.length - 1];
+      const firstDate = firstDatedActivity?.activity.date.trim() || '';
+      const lastDate = lastDatedActivity?.activity.date.trim() || '';
+      const periodCovered = firstDatedActivity?.normalizedDate === lastDatedActivity?.normalizedDate
+        ? firstDate
+        : [firstDate, lastDate].filter(Boolean).join(' – ');
 
       return {
         ...group,
-        periodCovered: summary.periodCovered ?? (firstDate === lastDate ? firstDate : [firstDate, lastDate].filter(Boolean).join(' – ')),
-        actualDutyDays: summary.actualDutyDays ?? String(uniqueDutyDates.size),
-        totalHoursRendered: summary.totalHoursRendered ?? String(Number(totalHours.toFixed(2))),
+        periodCovered: group.activities.length ? periodCovered : summary.periodCovered ?? '',
+        actualDutyDays: group.activities.length ? String(uniqueDutyDates.size) : summary.actualDutyDays ?? '',
+        totalHoursRendered: group.activities.length
+          ? String(Number(totalHours.toFixed(2)))
+          : summary.totalHoursRendered ?? '',
         activitiesPerformed: summary.activitiesPerformed ?? '',
         learningExperience: summary.learningExperience ?? '',
       };

@@ -243,6 +243,7 @@ type MonthlyPhotoSelectionGroup = {
 type MonthlyPhotoSelection = {
   preference: string;
   groups: MonthlyPhotoSelectionGroup[];
+  focusedMonthKey: string | null;
   error: string;
 };
 
@@ -437,9 +438,9 @@ function getMonthlyJournalAIContext(form: NarrativeForm): Record<string, unknown
 
       return [{
         month: month.label,
-        periodCovered: aiText(summary.periodCovered || (activities.length ? month.periodCovered : ''), 100),
-        actualDutyDays: aiText(summary.actualDutyDays || (activities.length ? month.actualDutyDays : ''), 30),
-        totalHoursRendered: aiText(summary.totalHoursRendered || (activities.length ? month.totalHoursRendered : ''), 30),
+        periodCovered: aiText(month.periodCovered || summary.periodCovered || '', 100),
+        actualDutyDays: aiText(month.actualDutyDays || summary.actualDutyDays || '', 30),
+        totalHoursRendered: aiText(month.totalHoursRendered || summary.totalHoursRendered || '', 30),
         ...(activitiesPerformed ? { activitiesPerformed } : {}),
         ...(learningExperience ? { learningExperience } : {}),
         activities,
@@ -2270,7 +2271,7 @@ export default function Home() {
     }));
   };
 
-  const openMonthlyPhotoSelection = () => {
+  const openMonthlyPhotoSelection = (focusedMonthKey?: string) => {
     const groups = getMonthlyJournalGroups(
       form.appendices.dailyJournal,
       form.appendices.dailyJournalMonthlySummaries,
@@ -2335,18 +2336,25 @@ export default function Home() {
       };
     });
 
+    const focusKey = groups.some((group) => group.key === focusedMonthKey)
+      ? focusedMonthKey || null
+      : null;
+    const focusedGroup = groups.find((group) => group.key === focusKey);
     setMonthlyPhotoSelection({
       preference: '',
       groups,
+      focusedMonthKey: focusKey,
       error: '',
     });
     const detectedMonths = groups.filter((group) => group.activityCount > 0);
     setStatus(
-      detectedMonths.length
-        ? form.appendices.dailyJournalLayout === 'monthly'
-          ? `Review or change photos for ${detectedMonths.length} journal month${detectedMonths.length === 1 ? '' : 's'}.`
-          : `Detected ${detectedMonths.length} journal month${detectedMonths.length === 1 ? '' : 's'} from daily entry dates. Review the month groups before switching layouts.`
-        : 'No dated journal months detected. Add or correct daily dates to separate entries by month.',
+      focusedGroup
+        ? `Review or change photos for ${focusedGroup.label}.`
+        : detectedMonths.length
+          ? form.appendices.dailyJournalLayout === 'monthly'
+            ? `Review or change photos for ${detectedMonths.length} journal month${detectedMonths.length === 1 ? '' : 's'}.`
+            : `Detected ${detectedMonths.length} journal month${detectedMonths.length === 1 ? '' : 's'} from daily entry dates. Review the month groups before switching layouts.`
+          : 'No dated journal months detected. Add or correct daily dates to separate entries by month.',
     );
   };
 
@@ -2426,7 +2434,10 @@ export default function Home() {
   const saveMonthlyPhotoSelection = () => {
     if (!monthlyPhotoSelection) return;
 
-    const invalidGroup = monthlyPhotoSelection.groups.find((group) => {
+    const groupsToSave = monthlyPhotoSelection.focusedMonthKey
+      ? monthlyPhotoSelection.groups.filter((group) => group.key === monthlyPhotoSelection.focusedMonthKey)
+      : monthlyPhotoSelection.groups;
+    const invalidGroup = groupsToSave.find((group) => {
       if (!group.candidates.length) return false;
       return group.selectedIds.length < 1 || group.selectedIds.length > 4;
     });
@@ -2442,7 +2453,7 @@ export default function Home() {
 
     setForm((previous) => {
       const summaries = { ...previous.appendices.dailyJournalMonthlySummaries };
-      for (const group of monthlyPhotoSelection.groups) {
+      for (const group of groupsToSave) {
         const selectedIds = new Set(group.selectedIds);
         summaries[group.key] = {
           ...summaries[group.key],
@@ -2462,9 +2473,11 @@ export default function Home() {
     });
     setMonthlyPhotoSelection(null);
     setStatus(
-      form.appendices.dailyJournalLayout === 'monthly'
-        ? 'Monthly photo selections updated.'
-        : 'Monthly layout selected with your chosen photos.',
+      monthlyPhotoSelection.focusedMonthKey
+        ? `Monthly photo selections updated for ${groupsToSave[0]?.label || 'this month'}.`
+        : form.appendices.dailyJournalLayout === 'monthly'
+          ? 'Monthly photo selections updated.'
+          : 'Monthly layout selected with your chosen photos.',
     );
   };
 
@@ -3433,6 +3446,15 @@ export default function Home() {
     setStatus(`Applied ${selectedCount} AI-drafted fields. Review the report before exporting.`);
   };
 
+  const displayedMonthlyPhotoGroups = monthlyPhotoSelection
+    ? monthlyPhotoSelection.focusedMonthKey
+      ? monthlyPhotoSelection.groups.filter((group) => group.key === monthlyPhotoSelection.focusedMonthKey)
+      : monthlyPhotoSelection.groups
+    : [];
+  const focusedMonthlyPhotoGroup = monthlyPhotoSelection?.groups.find(
+    (group) => group.key === monthlyPhotoSelection.focusedMonthKey,
+  );
+
   return (
     <main className="min-h-screen min-w-0 overflow-x-hidden bg-slate-950 px-3 sm:px-4 md:px-6 lg:px-8 py-6 pb-24 sm:py-8 sm:pb-8 md:py-12 text-slate-100">
       {monthlyPhotoSelection && (
@@ -3448,20 +3470,24 @@ export default function Home() {
           <div className="flex max-h-[calc(100dvh-1rem)] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl sm:max-h-[calc(100dvh-3rem)] sm:rounded-3xl">
             <header className="border-b border-slate-800 p-4 sm:p-6">
               <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-300">Monthly Journal Photos</p>
-              <h2 id="monthly-photo-selection-title" className="mt-1 text-xl font-bold text-white">Choose the photos for your monthly layout</h2>
+              <h2 id="monthly-photo-selection-title" className="mt-1 text-xl font-bold text-white">
+                {focusedMonthlyPhotoGroup
+                  ? `Review or change photos for ${focusedMonthlyPhotoGroup.label}`
+                  : 'Choose the photos for your monthly layout'}
+              </h2>
               <div className="mt-3 rounded-xl border border-cyan-500/20 bg-cyan-500/[0.06] p-3">
                 <p className="text-xs font-semibold text-cyan-100">
-                  Detected {monthlyPhotoSelection.groups.filter((group) => group.activityCount > 0).length} month group(s) from daily journal entries
+                  Detected {displayedMonthlyPhotoGroups.filter((group) => group.activityCount > 0).length} month group(s) from daily journal entries
                 </p>
                 <div className="mt-2 flex flex-wrap gap-2">
-                  {monthlyPhotoSelection.groups.filter((group) => group.activityCount > 0).map((group) => (
+                  {displayedMonthlyPhotoGroups.filter((group) => group.activityCount > 0).map((group) => (
                     <span key={group.key} className="rounded-full border border-slate-700 bg-slate-950/70 px-2.5 py-1 text-[11px] text-slate-200">
                       {group.label}: {group.activityCount} entr{group.activityCount === 1 ? 'y' : 'ies'}
                       {group.periodCovered ? ` · ${group.periodCovered}` : ''}
                     </span>
                   ))}
                 </div>
-                {monthlyPhotoSelection.groups.some((group) => group.key === 'month-not-set' && group.activityCount > 0) && (
+                {displayedMonthlyPhotoGroups.some((group) => group.key === 'month-not-set' && group.activityCount > 0) && (
                   <p className="mt-2 text-xs text-amber-200">
                     Some entries have blank or unrecognized dates and are grouped under MONTH NOT SET. Correct those dates in the daily journal to assign them to a month.
                   </p>
@@ -3481,7 +3507,7 @@ export default function Home() {
               </label>
             </header>
             <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4 sm:p-6">
-              {monthlyPhotoSelection.groups.map((group) => {
+              {displayedMonthlyPhotoGroups.map((group) => {
                 const selectedIds = new Set(group.selectedIds);
                 const preferenceWords = monthlyPhotoSelection.preference
                   .toLowerCase()
@@ -4858,15 +4884,6 @@ export default function Home() {
 
                   {form.appendices.dailyJournalLayout === 'monthly' ? (
                     <div className="space-y-5">
-                      <div className="flex justify-end">
-                        <button
-                          type="button"
-                          onClick={openMonthlyPhotoSelection}
-                          className="min-h-10 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 text-xs font-semibold text-cyan-200 transition hover:bg-cyan-500/20"
-                        >
-                          Review or change monthly photos
-                        </button>
-                      </div>
                       {getMonthlyJournalGroups(
                         form.appendices.dailyJournal,
                         form.appendices.dailyJournalMonthlySummaries,
@@ -4890,7 +4907,15 @@ export default function Home() {
                         <section key={month.key} className="space-y-4 rounded-2xl border border-slate-800 bg-slate-900/60 p-4 sm:p-5">
                           <header className="flex flex-wrap items-center justify-between gap-2">
                             <h3 className="text-lg font-bold text-white">{month.label}</h3>
-                            <div className="flex items-center gap-2">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => openMonthlyPhotoSelection(month.key)}
+                                aria-label={`Review or change monthly photos for ${month.label}`}
+                                className="min-h-10 rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-xs font-semibold text-cyan-200 transition hover:bg-cyan-500/20"
+                              >
+                                Review or change monthly photos
+                              </button>
                               {monthKeyMatch && (
                                 monthKeyMatch[1] === 'unspecified' ? (
                                   <select
@@ -4948,9 +4973,10 @@ export default function Home() {
                               <input
                                 type="text"
                                 value={month.periodCovered}
+                                readOnly={month.activities.length > 0}
                                 onChange={(event) => updateMonthlyJournalSummary(month.key, 'periodCovered', event.target.value)}
                                 placeholder="e.g. June 23-30, 2026"
-                                className={fieldClass}
+                                className={`${fieldClass} read-only:cursor-default read-only:opacity-80`}
                               />
                             </label>
                             <div className="grid grid-cols-2 gap-3">
@@ -4959,8 +4985,9 @@ export default function Home() {
                                 <input
                                   type="text"
                                   value={month.actualDutyDays}
+                                  readOnly={month.activities.length > 0}
                                   onChange={(event) => updateMonthlyJournalSummary(month.key, 'actualDutyDays', event.target.value)}
-                                  className={fieldClass}
+                                  className={`${fieldClass} read-only:cursor-default read-only:opacity-80`}
                                 />
                               </label>
                               <label className="block text-xs font-semibold text-slate-300">
@@ -4968,8 +4995,9 @@ export default function Home() {
                                 <input
                                   type="text"
                                   value={month.totalHoursRendered}
+                                  readOnly={month.activities.length > 0}
                                   onChange={(event) => updateMonthlyJournalSummary(month.key, 'totalHoursRendered', event.target.value)}
-                                  className={fieldClass}
+                                  className={`${fieldClass} read-only:cursor-default read-only:opacity-80`}
                                 />
                               </label>
                             </div>
@@ -5000,9 +5028,6 @@ export default function Home() {
                           <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3 sm:p-4">
                             <label className="block text-xs font-semibold text-slate-300">
                               Monthly Photo Documentation (Max 4)
-                              <span className="mt-1 block font-normal text-slate-400">
-                                If this month has no existing monthly photos, one photo from its dated entries is selected automatically. You can add or remove photos for this month here.
-                              </span>
                               <input
                                 type="file"
                                 accept="image/png, image/jpeg, image/jpg, image/webp"
