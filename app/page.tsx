@@ -170,7 +170,7 @@ const defaultForm = {
     organizationStructureImage: ''
   },
   appendices: {
-    dailyJournalLayout: 'report',
+    dailyJournalLayout: 'current',
     dailyJournalMonthlySummaries: {} as Record<string, MonthlyJournalSummary>,
     reportFooter: {
       preparedByLabel: 'Prepared By:',
@@ -276,20 +276,6 @@ function normalizeDailyJournalDays(journal: NarrativeJournalWeek[]): NarrativeJo
       ...activity,
       day: `Day ${dayNumber++}`
     }))
-  }));
-}
-
-function removeLeadingEmptyJournalWeeks(journal: NarrativeJournalWeek[]): NarrativeJournalWeek[] {
-  const firstPopulatedWeek = journal.findIndex((week) => (
-    week.narrative.trim()
-    || week.activities.some((activity) => activity.date.trim() || activity.accomplishment.trim())
-    || [week.images, week.currentLayoutImages, week.reportLayoutImages]
-      .some((images) => images?.some((image) => Boolean(image?.base64)))
-  ));
-  if (firstPopulatedWeek <= 0) return journal;
-  return journal.slice(firstPopulatedWeek).map((week, index) => ({
-    ...week,
-    weekNumber: index + 1,
   }));
 }
 
@@ -771,10 +757,6 @@ function mergeNarrativeForm(parsedForm: Record<string, unknown>): NarrativeForm 
 
   return {
     ...mergedForm,
-    appendices: {
-      ...mergedForm.appendices,
-      dailyJournal: removeLeadingEmptyJournalWeeks(mergedForm.appendices.dailyJournal),
-    },
     tableOfContents: syncSchoolPlacementTOC(mergedForm.tableOfContents, mergedForm.schoolPlacement.enabled)
   };
 }
