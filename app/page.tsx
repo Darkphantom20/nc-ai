@@ -2265,43 +2265,6 @@ export default function Home() {
     }));
   };
 
-  const updateMonthlyJournalSummary = (
-    monthKey: string,
-    field: keyof MonthlyJournalSummary,
-    value: string,
-  ) => {
-    setForm((prev) => ({
-      ...prev,
-      appendices: {
-        ...prev.appendices,
-        dailyJournalMonthlySummaries: {
-          ...prev.appendices.dailyJournalMonthlySummaries,
-          [monthKey]: {
-            ...prev.appendices.dailyJournalMonthlySummaries[monthKey],
-            [field]: value,
-          },
-        },
-      },
-    }));
-  };
-
-  const moveMonthlyJournalMonth = (monthKey: string, value: string) => {
-    const targetMatch = value.match(/^(\d{4}|unspecified)-(\d{1,2})$/);
-    const sourceMatch = monthKey.match(/^(\d{4}|unspecified)-(\d{1,2})$/);
-    if (!targetMatch || !sourceMatch) return;
-
-    const targetYear = targetMatch[1] === 'unspecified' ? null : Number(targetMatch[1]);
-    const targetMonthIndex = Number(targetMatch[2]) - 1;
-    const oldMonthIndex = Number(sourceMatch[2]) - 1;
-    if (targetMonthIndex < 0 || targetMonthIndex >= MONTH_NAMES.length) return;
-
-    const targetKey = `${targetMatch[1]}-${targetMonthIndex + 1}`;
-    if (targetKey === monthKey) return;
-
-    const groups = getMonthlyJournalGroups(
-      form.appendices.dailyJournal,
-      form.appendices.dailyJournalMonthlySummaries,
-    );
   const openMonthlyPhotoSelection = () => {
     const groups = getMonthlyJournalGroups(
       form.appendices.dailyJournal,
@@ -2425,6 +2388,43 @@ export default function Home() {
     setStatus('Monthly layout selected with your chosen photos.');
   };
 
+  const updateMonthlyJournalSummary = (
+    monthKey: string,
+    field: keyof MonthlyJournalSummary,
+    value: string,
+  ) => {
+    setForm((prev) => ({
+      ...prev,
+      appendices: {
+        ...prev.appendices,
+        dailyJournalMonthlySummaries: {
+          ...prev.appendices.dailyJournalMonthlySummaries,
+          [monthKey]: {
+            ...prev.appendices.dailyJournalMonthlySummaries[monthKey],
+            [field]: value,
+          },
+        },
+      },
+    }));
+  };
+
+  const moveMonthlyJournalMonth = (monthKey: string, value: string) => {
+    const targetMatch = value.match(/^(\d{4}|unspecified)-(\d{1,2})$/);
+    const sourceMatch = monthKey.match(/^(\d{4}|unspecified)-(\d{1,2})$/);
+    if (!targetMatch || !sourceMatch) return;
+
+    const targetYear = targetMatch[1] === 'unspecified' ? null : Number(targetMatch[1]);
+    const targetMonthIndex = Number(targetMatch[2]) - 1;
+    const oldMonthIndex = Number(sourceMatch[2]) - 1;
+    if (targetMonthIndex < 0 || targetMonthIndex >= MONTH_NAMES.length) return;
+
+    const targetKey = `${targetMatch[1]}-${targetMonthIndex + 1}`;
+    if (targetKey === monthKey) return;
+
+    const groups = getMonthlyJournalGroups(
+      form.appendices.dailyJournal,
+      form.appendices.dailyJournalMonthlySummaries,
+    );
     const sourceGroup = groups.find((group) => group.key === monthKey);
     if (!sourceGroup) return;
 
