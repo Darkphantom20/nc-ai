@@ -222,6 +222,7 @@ export async function POST(request: Request) {
       const relevantDetails = {
         ...(schoolPlacementRequest ? { placementScope: 'schoolPlacement' } : {}),
         ...(hasSourceDetails(source.weeklyJournal) ? { weeklyJournal: source.weeklyJournal } : {}),
+        ...(hasSourceDetails(source.monthlyJournal) ? { monthlyJournal: source.monthlyJournal } : {}),
         ...(Object.keys(relevantSections).length ? { relatedSections: relevantSections } : {}),
       };
       if (hasSourceDetails(relevantDetails)) {
@@ -246,6 +247,7 @@ export async function POST(request: Request) {
       const relevantDetails = {
         ...(schoolPlacementRequest ? { placementScope: 'schoolPlacement' } : {}),
         ...(hasSourceDetails(source.weeklyJournal) ? { weeklyJournal: source.weeklyJournal } : {}),
+        ...(hasSourceDetails(source.monthlyJournal) ? { monthlyJournal: source.monthlyJournal } : {}),
         ...(Object.keys(relevantSections).length ? { relatedSections: relevantSections } : {}),
       };
       if (hasSourceDetails(relevantDetails)) {
@@ -254,7 +256,10 @@ export async function POST(request: Request) {
       promptSourceDetails = actionSourceDetails;
     }
     const journalActionEvidence = isRecord(body.sourceDetails)
-      && hasSourceDetails(body.sourceDetails.weeklyJournal);
+      && (
+        hasSourceDetails(body.sourceDetails.weeklyJournal)
+        || hasSourceDetails(body.sourceDetails.monthlyJournal)
+      );
     const schoolPlacementRelatedSections = schoolPlacementRequest
       && isRecord(body.sourceDetails)
       && isRecord(body.sourceDetails.relatedSections)
@@ -271,7 +276,7 @@ export async function POST(request: Request) {
         {
           error: schoolPlacementRequest
             ? 'Add the steps you actually took to the second-placement task/procedure details or generation focus before generating a solution.'
-            : 'Add the steps you actually took to the weekly journal or generation focus before generating a solution.',
+            : 'Add the steps you actually took to the weekly or monthly journal, or to the generation focus, before generating a solution.',
         },
         { status: 400 },
       );
@@ -301,7 +306,7 @@ export async function POST(request: Request) {
       'You are a careful academic writing assistant for an On-the-Job Training (OJT) narrative report.',
       `Section: ${title}`,
       schoolPlacementRequest
-        ? 'This request is only about the second OJT placement. Use only its supplied organization details, related second-placement fields, current text, and user focus. Never use details from the first placement or its journal as evidence for this placement.'
+        ? 'This request is only about the second OJT placement. Use only its supplied organization details, related second-placement fields, current text, and user focus. If placement boundaries and dated journal entries are supplied, use only entries on or after the second-placement start date; never use entries from the first placement or transition gap.'
         : '',
       taskDutyRequest
         ? 'This is a Tasks and Duties section. When a user focus is supplied, treat it as the primary instruction and authoritative account of the tasks to include. It overrides conflicting or unrelated wording in the current draft. Do not retain introduction, orientation, or team-introduction details when the focus asks for work responsibilities instead. Use journal entries only to clarify or corroborate tasks that match the focus; do not add unrelated activities just because they appear elsewhere in the journal.'
@@ -318,7 +323,7 @@ export async function POST(request: Request) {
       completedActionRequest
         ? schoolPlacementRequest
           ? 'For this completed-action field, the current section text is only a draft and is not factual evidence. The matching issue is context, not proof of a solution. Use the user focus and second-placement task or procedure details only when they explicitly document the steps actually taken for this problem. If no matching steps are documented, ask the user to provide them instead of inventing an action.'
-          : 'For this completed-action field, the current section text is only a draft to revise and is not factual evidence; it may contain earlier unsupported AI claims. The matching problem is context, not proof of a solution. Use the user focus and weekly journal as evidence, and report completed actions only when those sources document them for this problem. If they do not document the steps actually taken, ask the user to provide them instead of generating an action.'
+          : 'For this completed-action field, the current section text is only a draft to revise and is not factual evidence; it may contain earlier unsupported AI claims. The matching problem is context, not proof of a solution. Use the user focus and weekly or monthly journal as evidence, and report completed actions only when those sources document them for this problem. If they do not document the steps actually taken, ask the user to provide them instead of generating an action.'
         : taskDutyRequest
           ? 'Use the user focus first. Use the current field draft and related weekly journal only for details that directly match the focus; exclude unrelated tasks and context.'
           : reflectionRequest
@@ -329,7 +334,7 @@ export async function POST(request: Request) {
           ? 'Use only facts directly supported by the attached photos or explicitly provided in the user focus; do not rely on outside knowledge or assumptions.'
           : schoolPlacementRequest
           ? 'Use only the current second-placement section text, optional user focus, and supplied second-placement details as factual evidence. Use related fields only when directly relevant; do not use or assume facts from the first placement.'
-          : 'Use only the current section text, the optional user focus, and source details supplied below as factual evidence. The weeklyJournal entries and weekly narratives are the primary source for the student’s actual work; base relevant tasks, duties, procedures, problems, actions, results, lessons, and reflections on them. Other user-provided sections are supporting context: use them only when directly relevant and never let generic sample text override the journal.',
+          : 'Use only the current section text, the optional user focus, and source details supplied below as factual evidence. The weeklyJournal entries and monthlyJournal summaries and entries are the primary sources for the student’s actual work; base relevant tasks, duties, procedures, problems, actions, results, lessons, and reflections on them. Other user-provided sections are supporting context: use them only when directly relevant and never let generic sample text override the journal.',
       monthlyImageJournalRequest
         ? ''
         : 'Weekly journal activities do not establish official organization facts. For organization background, vision, mission, objectives, core values, or services, rely only on explicit organization details and ask for official wording when it is missing.',
@@ -352,7 +357,7 @@ export async function POST(request: Request) {
       issueRequest
         ? schoolPlacementRequest
           ? 'For this issue field, use an explicitly documented second-placement issue if one is supplied. Otherwise, describe one potential challenge directly related to a concrete second-placement task and clearly label it potential, not confirmed. Never say the student experienced, struggled with, or resolved an undocumented issue. Keep the description limited to the supplied task and objects; add no unstated causes, conditions, standards, effects, outcomes, actions, or recommendations. If no concrete second-placement task is supplied, ask for details.'
-          : 'For this issue field, use an explicitly documented issue if one is in the journal. Otherwise, describe one potential challenge directly related to a concrete journal task, and clearly label it as potential rather than a confirmed event. Never imply the student actually experienced, struggled with, or resolved an undocumented issue. Keep the description limited to the task and objects named in the journal; do not add unstated reasons, conditions, systems, standards, policies, protocols, requirements, failures, effects, consequences, actions, or recommendations. Put any documented actions in the matching strategy/action field instead. For example, a journal entry saying “helped arrange documents and papers” supports “A potential challenge was organizing the documents and papers clearly,” but does not support claims about misfiling, compliance, or retrieval. If no concrete task is documented, ask for more information.'
+          : 'For this issue field, use an explicitly documented issue if one is in the weekly or monthly journal. Otherwise, describe one potential challenge directly related to a concrete task in those journal details, and clearly label it as potential rather than a confirmed event. Monthly journal entries include a journalMonthNumber in chronological order; when the user focus specifies a month number, use the matching monthlyJournal entry and do not substitute another month. Never imply the student actually experienced, struggled with, or resolved an undocumented issue. Keep the description limited to the task and objects named in the journal; do not add unstated reasons, conditions, systems, standards, policies, protocols, requirements, failures, effects, consequences, actions, or recommendations. Put any documented actions in the matching strategy/action field instead. For example, a journal entry saying “helped arrange documents and papers” supports “A potential challenge was organizing the documents and papers clearly,” but does not support claims about misfiling, compliance, or retrieval. If no concrete task is documented, ask for more information.'
         : '',
       completedActionRequest
         ? `For a solution or action-undertaken field${actionProblemNumber ? ` for Problem ${actionProblemNumber}` : ''}, report only steps and outcomes explicitly recorded as actions for that problem. Do not borrow unrelated journal tasks, infer a fix, convert a recommendation into a completed action, or claim success unless stated. If no matching action is documented, ask the user to provide the steps taken.`

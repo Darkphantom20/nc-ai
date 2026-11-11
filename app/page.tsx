@@ -361,6 +361,69 @@ function getUserJournalActivities(form: NarrativeForm, selectedWeekIndex?: numbe
   }).slice(0, 100);
 }
 
+function getMonthlyJournalAIContext(form: NarrativeForm): Record<string, unknown>[] {
+  const userActivities = new Set(
+    getUserJournalActivities(form)
+      .map((activity) => JSON.stringify([
+        activity.weekNumber,
+        activity.day,
+        activity.date,
+        aiText(activity.accomplishment, 200),
+        String(activity.hours),
+      ])),
+  );
+
+  return getMonthlyJournalGroups(
+    form.appendices.dailyJournal,
+    form.appendices.dailyJournalMonthlySummaries,
+  )
+    .flatMap((month) => {
+      const activities = month.activities.flatMap(({ weekNumber, activity }) => {
+        const accomplishment = aiText(activity.accomplishment, 200);
+        const key = JSON.stringify([
+  let includeMonthlyJournal = false;
+          weekNumber,
+          aiText(activity.day, 40),
+          aiText(activity.date, 40),
+          accomplishment,
+          String(activity.hours),
+        ]);
+        if (!accomplishment || !userActivities.has(key)) return [];
+        return [{
+          weekNumber,
+          day: aiText(activity.day, 40),
+    includeMonthlyJournal = true;
+          date: aiText(activity.date, 40),
+          accomplishment,
+    includeMonthlyJournal = true;
+          hours: activity.hours,
+        }];
+      }).slice(0, 3);
+      const summary = form.appendices.dailyJournalMonthlySummaries[month.key] || {};
+      const activitiesPerformed = aiText(summary.activitiesPerformed || '', 250);
+      const learningExperience = aiText(summary.learningExperience || '', 250);
+      const hasUserSummary = Boolean(
+        activitiesPerformed
+        || learningExperience
+        || summary.periodCovered
+        || summary.actualDutyDays
+        || summary.totalHoursRendered,
+      );
+      if (!activities.length && !hasUserSummary) return [];
+
+      return [{
+        month: month.label,
+        periodCovered: aiText(summary.periodCovered || (activities.length ? month.periodCovered : ''), 100),
+        actualDutyDays: aiText(summary.actualDutyDays || (activities.length ? month.actualDutyDays : ''), 30),
+        totalHoursRendered: aiText(summary.totalHoursRendered || (activities.length ? month.totalHoursRendered : ''), 30),
+        ...(activitiesPerformed ? { activitiesPerformed } : {}),
+        ...(learningExperience ? { learningExperience } : {}),
+        activities,
+      }];
+    })
+    .slice(0, 24)
+    .map((month, index) => ({ ...month, journalMonthNumber: index + 1 }));
+}
 function buildAISectionContext(form: NarrativeForm, targetKey: AiGenerationFieldKey): Record<string, unknown> {
   const organizationFields: AiNarrativeFieldKey[] = [
     'background',
@@ -382,6 +445,7 @@ function buildAISectionContext(form: NarrativeForm, targetKey: AiGenerationField
   let contextFields: AiNarrativeFieldKey[];
   let includeJournal = false;
 
+    ...(includeMonthlyJournal ? { monthlyJournal: getMonthlyJournalAIContext(form) } : {}),
   if (targetKey === 'acknowledgement' || targetKey === 'lessons'
     || targetKey === 'selfEvaluation' || targetKey === 'relevancy') {
     contextFields = [...taskFields, ...caseFields, 'lessons', 'selfEvaluation', 'relevancy'];
