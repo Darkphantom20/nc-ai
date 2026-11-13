@@ -2,7 +2,11 @@ import fs from 'fs';
 import path from 'path';
 import { createClient } from '@supabase/supabase-js';
 import { Document, Packer, Paragraph, TextRun, AlignmentType, ImageRun, Header, Footer, Table, TableRow, TableCell, WidthType, BorderStyle, TableLayoutType, TabStopType } from 'docx';
-import { getMonthlyJournalGroups, type MonthlyJournalSummary } from '../../../lib/monthly-journal';
+import {
+  getMonthlyJournalGroups,
+  getJournalPlacement,
+  type MonthlyJournalSummary,
+} from '../../../lib/monthly-journal';
 
 export const runtime = 'nodejs';
 
@@ -249,7 +253,11 @@ export async function POST(request: Request) {
       },
     ];
 
-    const dailyJournalContent = buildDailyJournalAppendixPage(data.appendices);
+    const dailyJournalContent = buildDailyJournalAppendixPage(
+      data.appendices,
+      data.schoolPlacement?.enabled ? data.schoolPlacement.firstPlacementEndDate : '',
+      data.schoolPlacement?.enabled ? data.schoolPlacement.startDate : '',
+    );
     if (dailyJournalContent.length > 0) {
       documentSections.push({
         properties: {
@@ -461,7 +469,11 @@ function buildTemplateTableOfContents(data: any): any[] {
   }));
 }
 
-function buildMonthlyJournalPages(appendices: AppendicesData): (Paragraph | Table)[] {
+function buildMonthlyJournalPages(
+  appendices: AppendicesData,
+  firstPlacementEndDate = '',
+  schoolPlacementStartDate = '',
+): (Paragraph | Table)[] {
   const weeks = appendices.dailyJournal || [];
   const groups = getMonthlyJournalGroups(weeks, appendices.dailyJournalMonthlySummaries);
   const children: (Paragraph | Table)[] = [];
@@ -487,8 +499,57 @@ function buildMonthlyJournalPages(appendices: AppendicesData): (Paragraph | Tabl
       }));
     }
 
-    children.push(
-      new Paragraph({
+    if ((firstPlacementEndDate || schoolPlacementStartDate) && month.activities.length > 0) {
+      const placementStats = {
+        first: { dates: new Set<string>(), hours: 0 },
+        school: { dates: new Set<string>(), hours: 0 },
+        unclassified: 0,
+      };
+      month.activities.forEach(({ activity, weekIndex, dayIndex }) => {
+        const placement = getJournalPlacement(
+          activity.date,
+          firstPlacementEndDate,
+          schoolPlacementStartDate,
+        );
+        if (placement !== 'first' && placement !== 'school') {
+          placementStats.unclassified += 1;
+          return;
+        }
+        const stats = placement === 'school' ? placementStats.school : placementStats.first;
+        if ((Number(activity.hours) || 0) > 0) {
+          stats.dates.add(activity.date.trim().toLowerCase() || `${weekIndex}-${dayIndex}`);
+        }
+        stats.hours += Number(activity.hours) || 0;
+      });
+      children.push(
+        new Paragraph({
+          tabStops: [{ type: TabStopType.RIGHT, position: 9360 }],
+          spacing: { before: 0, after: 0, line: 276, lineRule: 'auto' },
+          children: [
+            new TextRun({ text: `First Placement: ${placementStats.first.dates.size} duty days`, size: 22, font: 'Times New Roman' }),
+            new TextRun({ text: '\t', size: 22, font: 'Times New Roman' }),
+            new TextRun({ text: `${Number(placementStats.first.hours.toFixed(2))} hours`, size: 22, font: 'Times New Roman' }),
+          ],
+        }),
+        new Paragraph({
+          tabStops: [{ type: TabStopType.RIGHT, position: 9360 }],
+          spacing: { before: 0, after: 0, line: 276, lineRule: 'auto' },
+          children: [
+            new TextRun({ text: `School Placement: ${placementStats.school.dates.size} duty days`, size: 22, font: 'Times New Roman' }),
+            new TextRun({ text: '\t', size: 22, font: 'Times New Roman' }),
+            new TextRun({ text: `${Number(placementStats.school.hours.toFixed(2))} hours`, size: 22, font: 'Times New Roman' }),
+          ],
+        }),
+        ...(placementStats.unclassified > 0
+          ? [new Paragraph({
+              spacing: { before: 0, after: 0, line: 276, lineRule: 'auto' },
+              children: [new TextRun({ text: `${placementStats.unclassified} journal entry date(s) could not be assigned to a placement.`, italics: true, size: 20, font: 'Times New Roman' })],
+            })]
+          : []),
+      );
+    } else {
+      children.push(
+        new Paragraph({
         tabStops: [{ type: TabStopType.RIGHT, position: 9360 }],
         spacing: { before: 0, after: 0, line: 276, lineRule: 'auto' },
         children: [
@@ -505,8 +566,9 @@ function buildMonthlyJournalPages(appendices: AppendicesData): (Paragraph | Tabl
           new TextRun({ text: '\t', size: 22, font: 'Times New Roman' }),
           new TextRun({ text: month.totalHoursRendered, size: 22, font: 'Times New Roman' }),
         ],
-      }),
-    );
+        }),
+      );
+    }
 
     children.push(new Paragraph({
       alignment: AlignmentType.LEFT,
@@ -1225,6 +1287,8 @@ function getSectionPageMap(data: any): Record<string, number> {
       { key: 'school ojt introduction', value: [
         { title: 'School/OJT Unit', content: data.schoolPlacement.trainingOrganization },
         { title: 'Location', content: data.schoolPlacement.trainingLocation },
+        { title: 'First Placement End Date', content: data.schoolPlacement.firstPlacementEndDate },
+        { title: 'Placement Start Date', content: data.schoolPlacement.startDate },
         { title: 'Background of the Organization', content: data.schoolPlacement.background },
         { title: 'Vision', content: data.schoolPlacement.vision },
         { title: 'Mission', content: data.schoolPlacement.mission },
@@ -1523,6 +1587,8 @@ function buildSchoolPlacementPages(placement: any, compact = false, lineSpacing 
       content: [
         { title: 'School/OJT Unit', content: placement.trainingOrganization },
         { title: 'Location', content: placement.trainingLocation },
+        { title: 'First Placement End Date', content: placement.firstPlacementEndDate },
+        { title: 'Placement Start Date', content: placement.startDate },
         { title: 'Background of the Organization', content: placement.background },
         { title: 'Vision', content: placement.vision },
         { title: 'Mission', content: placement.mission },
@@ -1839,7 +1905,11 @@ function buildReportFooterBlock(footer?: ReportFooterData): any[] {
   ];
 }
 
-function buildDailyJournalAppendixPage(appendicesData: AppendicesData) {
+function buildDailyJournalAppendixPage(
+  appendicesData: AppendicesData,
+  firstPlacementEndDate = '',
+  schoolPlacementStartDate = '',
+) {
   const children: any[] = [
     new Paragraph({
       alignment: AlignmentType.CENTER,
@@ -1857,7 +1927,11 @@ function buildDailyJournalAppendixPage(appendicesData: AppendicesData) {
       : appendicesData.dailyJournalLayout === 'monthly' ? 'monthly' : 'current';
 
   if (layout === 'monthly') {
-    children.push(...buildMonthlyJournalPages(appendicesData));
+    children.push(...buildMonthlyJournalPages(
+      appendicesData,
+      firstPlacementEndDate,
+      schoolPlacementStartDate,
+    ));
     return children;
   }
 

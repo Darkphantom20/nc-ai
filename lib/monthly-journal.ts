@@ -75,6 +75,42 @@ export function normalizeJournalDate(date: string, fallbackYear?: number): strin
   return makeIsoDate(year, monthIndex + 1, day);
 }
 
+export function isJournalDateOnOrAfter(
+  date: string,
+  startDate: string,
+): boolean | null {
+  const start = normalizeJournalDate(startDate);
+  if (!start) return null;
+  const fallbackYear = Number(start.slice(0, 4));
+  const activity = normalizeJournalDate(date, fallbackYear);
+  if (!activity) return null;
+  return activity >= start;
+}
+
+export type JournalPlacement = 'first' | 'school' | 'transition' | 'unknown';
+
+export function getJournalPlacement(
+  date: string,
+  firstPlacementEndDate: string,
+  secondPlacementStartDate: string,
+): JournalPlacement {
+  const firstEnd = firstPlacementEndDate ? normalizeJournalDate(firstPlacementEndDate) : null;
+  const secondStart = secondPlacementStartDate ? normalizeJournalDate(secondPlacementStartDate) : null;
+  const boundaryYear = secondStart || firstEnd;
+  const yearsDiffer = firstEnd && secondStart && firstEnd.slice(0, 4) !== secondStart.slice(0, 4);
+  const hasExplicitYear = /\b(?:19|20)\d{2}\b/.test(date)
+    || /^\s*\d{1,2}[-/]\d{1,2}[-/]\d{2,4}\s*$/.test(date);
+  if (yearsDiffer && !hasExplicitYear) return 'unknown';
+  const activity = normalizeJournalDate(date, boundaryYear ? Number(boundaryYear.slice(0, 4)) : undefined);
+  if (!activity) return 'unknown';
+  if (secondStart && activity >= secondStart) return 'school';
+  if (firstEnd && activity <= firstEnd) return 'first';
+  if (firstEnd && secondStart && activity > firstEnd && activity < secondStart) return 'transition';
+  if (secondStart) return 'first';
+  if (firstEnd) return 'unknown';
+  return 'first';
+}
+
 function normalizeJournalYear(year: number): number {
   return year < 100 ? (year < 50 ? 2000 + year : 1900 + year) : year;
 }

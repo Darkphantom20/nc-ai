@@ -8,6 +8,7 @@ import { HelpCircle, ImagePlus, ZoomIn, ZoomOut, Maximize2, X, Eye, FileText, Sp
 import {
   getMonthlyJournalGroups,
   getNextMonthlyJournalKey,
+  getJournalPlacement,
   MONTH_NAMES,
   type MonthlyJournalSummary,
 } from '../lib/monthly-journal';
@@ -147,6 +148,8 @@ const defaultForm = {
     enabled: false,
     trainingOrganization: 'Jose Rizal Memorial State University',
     trainingLocation: 'School-based OJT',
+    firstPlacementEndDate: '',
+    startDate: '',
     background: '',
     vision: '',
     mission: '',
@@ -389,6 +392,19 @@ function getUserJournalActivities(form: NarrativeForm, selectedWeekIndex?: numbe
   }).slice(0, 100);
 }
 
+function getJournalActivitiesForPlacement(form: NarrativeForm, schoolPlacement: boolean) {
+  const activities = getUserJournalActivities(form);
+  const { firstPlacementEndDate, startDate } = form.schoolPlacement;
+  if (!form.schoolPlacement.enabled || (!firstPlacementEndDate && !startDate)) {
+    return schoolPlacement ? [] : activities;
+  }
+
+  return activities.filter((activity) => (
+    getJournalPlacement(activity.date, firstPlacementEndDate, startDate)
+      === (schoolPlacement ? 'school' : 'first')
+  ));
+}
+
 function getMonthlyJournalAIContext(form: NarrativeForm): Record<string, unknown>[] {
   const userActivities = new Set(
     getUserJournalActivities(form)
@@ -502,7 +518,8 @@ function buildAISectionContext(form: NarrativeForm, targetKey: AiGenerationField
   const weeklyJournal = includeJournal
     ? (() => {
         const weeks = new Map<number, { weekNumber: number; activities: ReturnType<typeof getUserJournalActivities> }>();
-        for (const activity of getUserJournalActivities(form).slice(-60)) {
+        const activityLimit = includeMonthlyJournal ? 20 : 60;
+        for (const activity of getJournalActivitiesForPlacement(form, false).slice(-activityLimit)) {
           const week = weeks.get(activity.weekNumber) || {
             weekNumber: activity.weekNumber,
             activities: [],
@@ -511,6 +528,8 @@ function buildAISectionContext(form: NarrativeForm, targetKey: AiGenerationField
           weeks.set(activity.weekNumber, week);
         }
         for (let weekIndex = 0; weekIndex < form.appendices.dailyJournal.length; weekIndex += 1) {
+          if (form.schoolPlacement.enabled
+            && (form.schoolPlacement.firstPlacementEndDate || form.schoolPlacement.startDate)) continue;
           const week = form.appendices.dailyJournal[weekIndex];
           if (weeks.size >= 15 && !weeks.has(week.weekNumber)) continue;
           const exampleNarrative = defaultForm.appendices.dailyJournal[weekIndex]?.narrative || '';
@@ -536,6 +555,13 @@ function buildAISectionContext(form: NarrativeForm, targetKey: AiGenerationField
   return {
     weeklyJournal,
     ...(includeMonthlyJournal ? { monthlyJournal: getMonthlyJournalAIContext(form) } : {}),
+    ...(form.schoolPlacement.enabled
+      && (form.schoolPlacement.firstPlacementEndDate || form.schoolPlacement.startDate)
+      ? {
+          firstPlacementEndDate: form.schoolPlacement.firstPlacementEndDate,
+          secondPlacementStartDate: form.schoolPlacement.startDate,
+        }
+      : {}),
     ...(organization ? { trainingOrganization: organization } : {}),
     ...(location ? { trainingLocation: location } : {}),
     ...(degreeProgram ? { degreeProgram } : {}),
@@ -546,6 +572,7 @@ function buildAISectionContext(form: NarrativeForm, targetKey: AiGenerationField
 function buildSchoolPlacementAIContext(
   placement: typeof defaultForm.schoolPlacement,
   targetKey: AiNarrativeFieldKey,
+  journalActivities: ReturnType<typeof getUserJournalActivities>,
 ): Record<string, unknown> {
   const relatedSections = Object.fromEntries(
     (Object.keys(aiNarrativeFieldLabels) as AiNarrativeFieldKey[])
@@ -569,12 +596,94 @@ function buildSchoolPlacementAIContext(
     defaultForm.schoolPlacement.trainingLocation,
     200,
   );
+  const firstPlacementEndDate = placement.firstPlacementEndDate.trim();
+  const startDate = placement.startDate.trim();
 
   return {
     placementScope: 'schoolPlacement',
     ...(organization ? { trainingOrganization: organization } : {}),
     ...(location ? { trainingLocation: location } : {}),
+    ...(firstPlacementEndDate ? { firstPlacementEndDate } : {}),
+    ...(startDate ? { placementStartDate: startDate } : {}),
+    ...(journalActivities.length ? { weeklyJournal: journalActivities.slice(-60) } : {}),
     relatedSections,
+  };
+}
+
+function buildPrimeNarrativeAIContext(form: NarrativeForm): Record<string, unknown> {
+  const fieldKeys = Object.keys(aiNarrativeFieldLabels) as AiNarrativeFieldKey[];
+  const firstOrganization = userProvidedText(
+    form.trainingOrganization,
+    defaultForm.trainingOrganization,
+    200,
+  );
+  const firstLocation = userProvidedText(form.trainingLocation, defaultForm.trainingLocation, 200);
+  const firstPlacementSections = Object.fromEntries(
+    fieldKeys.flatMap((key) => {
+      const value = userProvidedText(form[key], defaultForm[key], 400);
+      return value ? [[aiNarrativeFieldLabels[key], value]] : [];
+    }),
+  );
+  const firstPlacement = {
+    ...(firstOrganization ? { organization: firstOrganization } : {}),
+    ...(firstLocation ? { location: firstLocation } : {}),
+    ...(form.schoolPlacement.firstPlacementEndDate
+      ? { endDate: form.schoolPlacement.firstPlacementEndDate }
+      : {}),
+    relatedSections: firstPlacementSections,
+    weeklyJournal: getJournalActivitiesForPlacement(form, false)
+      .slice(-50)
+      .map(({ weekNumber, day, date, accomplishment, hours }) => ({
+        weekNumber,
+        day,
+        date,
+        accomplishment: aiText(accomplishment, 250),
+        hours,
+      })),
+  };
+  if (!form.schoolPlacement.enabled) {
+    return { firstPlacement };
+  }
+
+  const secondOrganization = userProvidedText(
+    form.schoolPlacement.trainingOrganization,
+    defaultForm.schoolPlacement.trainingOrganization,
+    200,
+  );
+  const secondLocation = userProvidedText(
+    form.schoolPlacement.trainingLocation,
+    defaultForm.schoolPlacement.trainingLocation,
+    200,
+  );
+  const secondPlacementSections = Object.fromEntries(
+    fieldKeys.flatMap((key) => {
+      const value = userProvidedText(
+        form.schoolPlacement[key],
+        defaultForm.schoolPlacement[key],
+        400,
+      );
+      return value ? [[aiNarrativeFieldLabels[key], value]] : [];
+    }),
+  );
+  return {
+    firstPlacement,
+    secondPlacement: {
+      ...(secondOrganization ? { organization: secondOrganization } : {}),
+      ...(secondLocation ? { location: secondLocation } : {}),
+      ...(form.schoolPlacement.startDate
+        ? { startDate: form.schoolPlacement.startDate }
+        : {}),
+      relatedSections: secondPlacementSections,
+      weeklyJournal: getJournalActivitiesForPlacement(form, true)
+        .slice(-50)
+        .map(({ weekNumber, day, date, accomplishment, hours }) => ({
+          weekNumber,
+          day,
+          date,
+          accomplishment: aiText(accomplishment, 250),
+          hours,
+        })),
+    },
   };
 }
 
@@ -2078,7 +2187,11 @@ export default function Home() {
     currentText,
     instructions,
     options,
-    buildSchoolPlacementAIContext(form.schoolPlacement, key),
+    buildSchoolPlacementAIContext(
+      form.schoolPlacement,
+      key,
+      getJournalActivitiesForPlacement(form, true),
+    ),
     defaultForm.schoolPlacement[key],
   );
 
@@ -2090,9 +2203,9 @@ export default function Home() {
     'PRIME Report Narrative',
     'PRIME Report Narrative',
     currentText,
-    'Use only the seminar details in the current text or generation focus. Do not invent dates, topics, speakers, activities, attendance, lessons, or personal outcomes. If the user has not supplied event details, ask them to add them.',
+    'Use the current PRIME text and generation focus for seminar facts. First- and second-placement details are supplied only as background to keep any directly relevant personal reflection accurate. Connect a placement detail to the seminar only when the user explicitly makes that connection; never present placement tasks as seminar activities or mix details between placements. Condense relevant facts instead of listing every task. Do not invent seminar dates, topics, speakers, activities, attendance, lessons, or personal outcomes. If no seminar details are supplied, ask the user to add them.',
     options,
-    {},
+    buildPrimeNarrativeAIContext(form),
     defaultForm.appendices.primeNarrative,
   );
 
@@ -3348,8 +3461,11 @@ export default function Home() {
         yearLevel: userProvidedText(form.studentYear, defaultForm.studentYear, 100),
         trainingDuration: userProvidedText(form.trainingDuration, defaultForm.trainingDuration, 300),
         report: selectFields(form, defaultForm),
-        dailyJournal: getUserJournalActivities(form),
-        weeklyNarratives: form.appendices.dailyJournal.flatMap((week, weekIndex) => {
+        dailyJournal: getJournalActivitiesForPlacement(form, false),
+        weeklyNarratives: form.schoolPlacement.enabled
+          && (form.schoolPlacement.firstPlacementEndDate || form.schoolPlacement.startDate)
+          ? []
+          : form.appendices.dailyJournal.flatMap((week, weekIndex) => {
           const narrative = userProvidedText(
             week.narrative,
             defaultForm.appendices.dailyJournal[weekIndex]?.narrative || '',
@@ -3370,7 +3486,10 @@ export default function Home() {
                 defaultForm.schoolPlacement.trainingLocation,
                 300,
               ),
+              startDate: form.schoolPlacement.startDate,
+              firstPlacementEndDate: form.schoolPlacement.firstPlacementEndDate,
               details: selectFields(form.schoolPlacement, defaultForm.schoolPlacement),
+              dailyJournal: getJournalActivitiesForPlacement(form, true),
             }
           : { enabled: false },
       };
@@ -4809,6 +4928,27 @@ export default function Home() {
                         <span className="text-cyan-300/70 text-[10px] uppercase tracking-wider block mb-1">Location</span>
                         <input value={form.schoolPlacement.trainingLocation} onChange={(e) => updateSchoolPlacementField('trainingLocation', e.target.value)} className={fieldClass} />
                       </label>
+                      <label className="block text-xs sm:text-sm font-medium text-slate-200">
+                        <span className="text-cyan-300/70 text-[10px] uppercase tracking-wider block mb-1">Last day at first placement</span>
+                        <input
+                          type="date"
+                          value={form.schoolPlacement.firstPlacementEndDate}
+                          onChange={(event) => updateSchoolPlacementField('firstPlacementEndDate', event.target.value)}
+                          className={fieldClass}
+                        />
+                      </label>
+                      <label className="block text-xs sm:text-sm font-medium text-slate-200">
+                        <span className="text-cyan-300/70 text-[10px] uppercase tracking-wider block mb-1">First day at second placement</span>
+                        <input
+                          type="date"
+                          value={form.schoolPlacement.startDate}
+                          onChange={(event) => updateSchoolPlacementField('startDate', event.target.value)}
+                          className={fieldClass}
+                        />
+                        <span className="mt-1 block text-[11px] leading-relaxed text-slate-400">
+                          For example, set August 7 as the last first-placement day and August 10 as the second-placement start. AI uses entries through August 7 for the first placement and entries from August 10 for School OJT; dates in between are not assigned to either placement. If the placements cross calendar years, include the year in each journal date.
+                        </span>
+                      </label>
                     </div>
                     <PlacementNarrativeFields
                       placement={form.schoolPlacement}
@@ -4909,7 +5049,35 @@ export default function Home() {
                         return (
                         <section key={month.key} className="space-y-4 rounded-2xl border border-slate-800 bg-slate-900/60 p-4 sm:p-5">
                           <header className="flex flex-wrap items-center justify-between gap-2">
-                            <h3 className="text-lg font-bold text-white">{month.label}</h3>
+                            <div>
+                              <h3 className="text-lg font-bold text-white">{month.label}</h3>
+                              {form.schoolPlacement.enabled
+                                && (form.schoolPlacement.firstPlacementEndDate || form.schoolPlacement.startDate)
+                                && month.activities.length > 0 && (() => {
+                                const firstPlacementDates = new Set<string>();
+                                const schoolPlacementDates = new Set<string>();
+                                let unassignedCount = 0;
+                                month.activities.forEach(({ activity }) => {
+                                  const date = activity.date.trim();
+                                  const placement = getJournalPlacement(
+                                    date,
+                                    form.schoolPlacement.firstPlacementEndDate,
+                                    form.schoolPlacement.startDate,
+                                  );
+                                  if (placement === 'school') schoolPlacementDates.add(date);
+                                  else if (placement === 'first') firstPlacementDates.add(date);
+                                  else unassignedCount += 1;
+                                });
+                                return (
+                                  <p className="mt-1 text-[11px] text-slate-400">
+                                    First placement: {firstPlacementDates.size} journal day(s)
+                                    {' · '}
+                                    School placement: {schoolPlacementDates.size} journal day(s)
+                                    {unassignedCount > 0 && ` · ${unassignedCount} entry date(s) fall between placements or need a clearer format`}
+                                  </p>
+                                );
+                              })()}
+                            </div>
                             <div className="flex flex-wrap items-center gap-2">
                               <button
                                 type="button"
