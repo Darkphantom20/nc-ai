@@ -484,12 +484,12 @@ function buildTemplateCoverPage(data: any): Paragraph[] {
   ];
 }
 
-function buildTemplateTableOfContents(data: any): any[] {
+function buildTemplateTableOfContents(data: any, includeTableFigureList: boolean): any[] {
   const schoolEnabled = data.schoolPlacement?.enabled;
   const rows: [string, string][] = [
     ['Acknowledgement', 'i'],
     ['Table of Contents', 'ii'],
-    ['List of Table/Figures', 'iii'],
+    ...(includeTableFigureList ? [['List of Table/Figures', 'iii'] as [string, string]] : []),
     ['I. ' + String(data.trainingOrganization || 'TRAINING ORGANIZATION').toUpperCase(), ''],
     ['Introduction', '1'],
     ['  Background of the Organization', ''],
@@ -538,12 +538,13 @@ function buildMonthlyJournalPages(
   appendices: AppendicesData,
   firstPlacementEndDate = '',
   schoolPlacementStartDate = '',
+  startingFigureNumber = 1,
 ): (Paragraph | Table)[] {
   const weeks = appendices.dailyJournal || [];
   const groups = getMonthlyJournalGroups(weeks, appendices.dailyJournalMonthlySummaries);
   const children: (Paragraph | Table)[] = [];
   const photoWeeksIncluded = new Set<number>();
-  let figureNumber = 1;
+  let figureNumber = startingFigureNumber;
 
   groups.forEach((month, monthIndex) => {
     children.push(
@@ -739,7 +740,10 @@ function buildMonthlyJournalPages(
   return children;
 }
 
-function buildTemplateDailyJournal(appendices: AppendicesData | undefined): (Paragraph | Table)[] {
+function buildTemplateDailyJournal(
+  appendices: AppendicesData | undefined,
+  startingFigureNumber = 1,
+): (Paragraph | Table)[] {
   if (!appendices) return [];
   const hasDailyJournal = Boolean(appendices.dailyJournal?.length);
   const hasMonthlySummaries = appendices.dailyJournalLayout === 'monthly'
@@ -759,11 +763,14 @@ function buildTemplateDailyJournal(appendices: AppendicesData | undefined): (Par
       : appendices.dailyJournalLayout === 'monthly' ? 'monthly' : 'current';
 
   if (layout === 'monthly') {
-    children.push(...buildMonthlyJournalPages(appendices));
+    children.push(...buildMonthlyJournalPages(appendices, '', '', startingFigureNumber));
     return children;
   }
 
+  let tableNumber = 0;
+  let figureNumber = startingFigureNumber;
   (appendices.dailyJournal || []).forEach((week, index) => {
+    const currentTableNumber = ++tableNumber;
     if (layout === 'report') {
       const reportImages = week.reportLayoutImages || week.images || [];
       children.push(
@@ -779,6 +786,16 @@ function buildTemplateDailyJournal(appendices: AppendicesData | undefined): (Par
           children: [new TextRun({ text: 'WEEKLY ACCOMPLISHMENT REPORT', bold: true, size: 24, font: 'Times New Roman' })],
         }),
         buildDailyReportTable(week.activities, reportImages),
+        new Paragraph({
+          alignment: AlignmentType.CENTER,
+          spacing: { before: 60, after: 120, line: 360, lineRule: 'auto' },
+          children: [new TextRun({
+            text: `Table ${currentTableNumber}: Journal Week ${week.weekNumber}`,
+            bold: true,
+            size: 24,
+            font: 'Times New Roman',
+          })],
+        }),
       );
       return;
     }
@@ -792,32 +809,39 @@ function buildTemplateDailyJournal(appendices: AppendicesData | undefined): (Par
       buildCurrentWeeklyTable(week.activities, week.totalHours),
     );
 
-    if (layout === 'current') {
+    if (layout === 'current' || layout === 'no-photo') {
       children.push(
         new Paragraph({
-        alignment: AlignmentType.CENTER,
-        spacing: { before: 120, after: 120, line: 360, lineRule: 'auto' },
-        children: [new TextRun({ text: `Table ${week.weekNumber}: Journal Week ${week.weekNumber}`, bold: true, size: 24, font: 'Times New Roman' })],
-      }),
-      new Paragraph({
-        alignment: AlignmentType.JUSTIFIED,
-        spacing: { after: 120, line: 360, lineRule: 'auto' },
-        children: [new TextRun({ text: week.narrative || 'No narrative provided.', size: 24, font: 'Times New Roman' })],
-      }),
+          alignment: AlignmentType.CENTER,
+          spacing: { before: 120, after: 120, line: 360, lineRule: 'auto' },
+          children: [new TextRun({
+            text: `Table ${currentTableNumber}: Journal Week ${week.weekNumber}`,
+            bold: true,
+            size: 24,
+            font: 'Times New Roman',
+          })],
+        }),
       );
     }
 
     if (layout === 'current') {
+      children.push(new Paragraph({
+        alignment: AlignmentType.JUSTIFIED,
+        spacing: { after: 120, line: 360, lineRule: 'auto' },
+        children: [new TextRun({ text: week.narrative || 'No narrative provided.', size: 24, font: 'Times New Roman' })],
+      }));
       const images = (week.currentLayoutImages || week.images || []).filter((image): image is string | AppendixImage => Boolean(image));
       if (images.length > 0) {
         children.push(buildImageGridTable(images));
-        images.forEach((image, imageIndex) => {
+        images.forEach((image) => {
+          const base64 = typeof image === 'string' ? image : image.base64;
+          if (!parseBase64Image(base64)) return;
           const detail = typeof image === 'string' ? '' : image.detail?.trim();
           children.push(new Paragraph({
             alignment: AlignmentType.CENTER,
             spacing: { before: 60, after: 120, line: 360, lineRule: 'auto' },
             children: [new TextRun({
-              text: `Figure ${imageIndex + 1}${detail ? `: ${detail}` : ''}`,
+              text: `Figure ${figureNumber++}: ${detail || 'Weekly documentation photo'}`,
               size: 24,
               font: 'Times New Roman',
             })],
@@ -958,59 +982,157 @@ function buildTemplateOrganizationPages(
   return children;
 }
 
+function getTemplateTableEntries(appendices?: AppendicesData): string[] {
+  if (!appendices || appendices.dailyJournalLayout === 'monthly') return [];
+  return (appendices.dailyJournal || []).map((week, index) => (
+    `Table ${index + 1}: Journal Week ${week.weekNumber}`
+  ));
+}
+
+function getTemplateFigurePlan(data: any): {
+  entries: string[];
+  organizationFigureNumber: number;
+  schoolFigureNumber: number;
+  journalFigureStartNumber: number;
+  primeFigureNumber: number;
+} {
+  const entries: string[] = [];
+  let nextFigureNumber = 1;
+  const addFigure = (description: string) => {
+    const number = nextFigureNumber++;
+    entries.push(`Figure ${number}: ${description}`);
+    return number;
+  };
+  const organizationFigureNumber = parseBase64Image(data.organizationStructureImage || '')
+    ? addFigure('Organizational Chart')
+    : 1;
+  const schoolFigureNumber = data.schoolPlacement?.enabled
+    && parseBase64Image(data.schoolPlacement.organizationStructureImage || '')
+    ? addFigure('School Placement Organizational Chart')
+    : nextFigureNumber;
+  const appendices = data.appendices as AppendicesData | undefined;
+  const layout = appendices?.dailyJournalLayout === 'monthly'
+    ? 'monthly'
+    : appendices?.dailyJournalLayout === 'report'
+      ? 'report'
+      : appendices?.dailyJournalLayout === 'no-photo'
+        ? 'no-photo'
+        : 'current';
+  const journalFigureStartNumber = nextFigureNumber;
+
+  if (appendices && layout === 'current') {
+    (appendices.dailyJournal || []).forEach((week) => {
+      const images = (week.currentLayoutImages || week.images || [])
+        .filter((image): image is string | AppendixImage => Boolean(image));
+      images.forEach((image) => {
+        const base64 = typeof image === 'string' ? image : image.base64;
+        if (!parseBase64Image(base64)) return;
+        const detail = typeof image === 'string' ? '' : image.detail?.trim() || '';
+        addFigure(detail || 'Weekly documentation photo');
+      });
+    });
+  } else if (appendices && layout === 'monthly') {
+    const weeks = appendices.dailyJournal || [];
+    const photoWeeksIncluded = new Set<number>();
+    getMonthlyJournalGroups(weeks, appendices.dailyJournalMonthlySummaries).forEach((month) => {
+      const monthlyPhotos = appendices.dailyJournalMonthlySummaries?.[month.key]?.photos || [];
+      const photoWeekIndices = Array.from(new Set(month.activities.map(({ weekIndex }) => weekIndex)))
+        .filter((weekIndex) => !photoWeeksIncluded.has(weekIndex));
+      const weeklyPhotos = photoWeekIndices.flatMap((weekIndex) => {
+        photoWeeksIncluded.add(weekIndex);
+        const week = weeks[weekIndex];
+        return (week?.currentLayoutImages || week?.images || [])
+          .filter((image): image is string | AppendixImage => Boolean(image));
+      });
+      const photos = monthlyPhotos.length > 0 ? monthlyPhotos : weeklyPhotos;
+      photos.forEach((photo) => {
+        const base64 = typeof photo === 'string' ? photo : photo.base64;
+        const buffer = parseBase64Image(base64);
+        const dimensions = buffer ? getMonthlyImageFormatAndDimensions(buffer) : null;
+        if (!dimensions || dimensions.width <= 0 || dimensions.height <= 0) return;
+        const detail = typeof photo === 'string' ? '' : photo.detail?.trim() || '';
+        addFigure(detail || 'Monthly journal photo');
+      });
+    });
+  }
+
+  const primeImages = (appendices?.primeReportImages || []).slice(0, 2);
+  const hasPrimeImages = Boolean(appendices?.primeNarrative) && primeImages.some((image) => {
+    const base64 = typeof image === 'string' ? image : image.base64;
+    return Boolean(parseBase64Image(base64));
+  });
+  const primeFigureNumber = hasPrimeImages
+    ? addFigure('PRIME report photos')
+    : nextFigureNumber;
+
+  return {
+    entries,
+    organizationFigureNumber,
+    schoolFigureNumber,
+    journalFigureStartNumber,
+    primeFigureNumber,
+  };
+}
+
+function buildTemplateTablesAndFiguresPage(tableEntries: string[], figureEntries: string[]): Paragraph[] {
+  if (tableEntries.length === 0 && figureEntries.length === 0) return [];
+
+  const children: Paragraph[] = [
+    new Paragraph({ pageBreakBefore: true }),
+    ...templateParagraph('LIST OF TABLES / FIGURES', { alignment: AlignmentType.CENTER, bold: true, after: 180 }),
+  ];
+  if (tableEntries.length > 0) {
+    children.push(...templateParagraph('LIST OF TABLES', { bold: true, after: 60 }));
+    tableEntries.forEach((entry) => children.push(...templateParagraph(entry, {})));
+  }
+  if (figureEntries.length > 0) {
+    children.push(...templateParagraph('LIST OF FIGURES', { bold: true, before: 120, after: 60 }));
+    figureEntries.forEach((entry) => children.push(...templateParagraph(entry, {})));
+  }
+  return children;
+}
+
 function buildDocxTemplateSections(data: any, compact = false): any[] {
+  const tableEntries = getTemplateTableEntries(data.appendices);
+  const figurePlan = getTemplateFigurePlan(data);
   const children: (Paragraph | Table)[] = [
     ...buildTemplateCoverPage(data),
     new Paragraph({ pageBreakBefore: true }),
     ...buildAcknowledgementPage(data, false, 360),
     new Paragraph({ pageBreakBefore: true }),
     ...templateParagraph('TABLE OF CONTENTS', { alignment: AlignmentType.CENTER, bold: true, after: 180 }),
-    ...buildTemplateTableOfContents(data),
-    new Paragraph({ pageBreakBefore: true }),
-    ...templateParagraph('LIST OF TABLES / FIGURES', { alignment: AlignmentType.CENTER, bold: true, after: 180 }),
-    ...templateParagraph('LIST OF TABLES', { bold: true, after: 60 }),
+    ...buildTemplateTableOfContents(data, tableEntries.length > 0 || figurePlan.entries.length > 0),
+    ...buildTemplateTablesAndFiguresPage(tableEntries, figurePlan.entries),
   ];
 
-  (data.appendices?.dailyJournal || []).forEach((week: DailyJournalWeek, index: number) => {
-    children.push(...templateParagraph(`Table ${index + 1}: Journal Week ${week.weekNumber}`, {}));
-  });
-
-  children.push(
-    ...templateParagraph('LIST OF FIGURES', { bold: true, before: 120, after: 60 }),
-  );
-
-  if (data.organizationStructureImage) {
-    children.push(...templateParagraph('Figure 1: Organizational Chart', {}));
-  }
-  if (data.schoolPlacement?.enabled && data.schoolPlacement.organizationStructureImage) {
-    children.push(...templateParagraph('Figure 2: School Placement Organizational Chart', {}));
-  }
-  const hasJournalPhotos = (data.appendices?.dailyJournal || []).some((week: DailyJournalWeek) =>
-    (week.currentLayoutImages || week.images || []).some((image) => Boolean(image)),
-  );
-  if (hasJournalPhotos) {
-    children.push(...templateParagraph('Figure 3: Weekly documentation photos', {}));
-  }
-  if (data.appendices?.primeReportImages?.length) {
-    children.push(...templateParagraph('Figure 4: PRIME report photos', {}));
-  }
-
-  children.push(...buildTemplateOrganizationPages(data.trainingOrganization, data, 'I', 1, compact));
+  children.push(...buildTemplateOrganizationPages(
+    data.trainingOrganization,
+    data,
+    'I',
+    figurePlan.organizationFigureNumber,
+    compact,
+  ));
   if (data.schoolPlacement?.enabled) {
     children.push(...buildTemplateOrganizationPages(
       data.schoolPlacement.trainingOrganization || 'SCHOOL OJT / SECOND PLACEMENT',
       data.schoolPlacement,
       'II',
-      2,
+      figurePlan.schoolFigureNumber,
       compact,
     ));
   }
 
-  const journalChildren = buildTemplateDailyJournal(data.appendices);
+  const journalChildren = buildTemplateDailyJournal(
+    data.appendices,
+    figurePlan.journalFigureStartNumber,
+  );
   if (journalChildren.length > 0) {
     children.push(new Paragraph({ pageBreakBefore: true }), ...journalChildren);
   }
-  const otherAppendices = buildOtherAppendixPages(data.appendices);
+  const otherAppendices = buildOtherAppendixPages(
+    data.appendices,
+    figurePlan.primeFigureNumber,
+  );
   if (otherAppendices.length > 0) {
     children.push(...otherAppendices);
   }
@@ -2134,7 +2256,7 @@ function buildDailyJournalAppendixPage(
   return children;
 }
 
-function buildOtherAppendixPages(appendicesData: AppendicesData) {
+function buildOtherAppendixPages(appendicesData: AppendicesData, primeFigureNumber = 1) {
   const children: any[] = [];
   if (!appendicesData) return children;
 
@@ -2170,8 +2292,23 @@ function buildOtherAppendixPages(appendicesData: AppendicesData) {
     if (app.isText) {
       if (app.key === 'primeNarrative') {
         const primeImages = (appendicesData.primeReportImages || []).slice(0, 2);
-        if (primeImages.length > 0) {
-          children.push(buildImageGridTable(primeImages));
+        const validPrimeImages = primeImages.filter((image) => {
+          const base64 = typeof image === 'string' ? image : image.base64;
+          return Boolean(parseBase64Image(base64));
+        });
+        if (validPrimeImages.length > 0) {
+          children.push(
+            buildImageGridTable(validPrimeImages),
+            new Paragraph({
+              alignment: AlignmentType.CENTER,
+              spacing: { before: 60, after: 120, line: 360, lineRule: 'auto' },
+              children: [new TextRun({
+                text: `Figure ${primeFigureNumber}: PRIME report photos`,
+                size: 24,
+                font: 'Times New Roman',
+              })],
+            }),
+          );
         }
         children.push(
           new Paragraph({
