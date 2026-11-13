@@ -5138,9 +5138,6 @@ export default function Home() {
                               </button>
                             </div>
                           </header>
-                          <p className="text-xs text-slate-400">
-                            All months are editable. These values are calculated from daily entries by default; clear an override to restore the calculated value.
-                          </p>
                           <div className="grid gap-3 sm:grid-cols-2">
                             <label className="block text-xs font-semibold text-slate-300">
                               Period Covered
