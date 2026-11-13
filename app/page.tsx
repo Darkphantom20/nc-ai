@@ -3047,7 +3047,7 @@ export default function Home() {
           currentText: aiText(summary[field] || '', 4000),
           focus: aiText(options.focus, 2000),
           instructions: field === 'activitiesPerformed'
-            ? `Write the ${monthLabel} Activities Performed section using only the supplied ${monthLabel} daily entries, existing monthly summary, user focus, and that month's selected photos. Summarize actual recorded tasks; never use activities from another month or infer undocumented actions, outcomes, or dates.`
+            ? `Write the ${monthLabel} Activities Performed section by analyzing and synthesizing the actual tasks across the supplied ${monthLabel} dated daily entries. Treat those entries as the primary evidence; the optional focus is guidance for emphasis, not proof of activities, and must not override conflicting entries. Use the existing monthly summary and selected photos only as supporting context. Never use activities from another month or infer undocumented actions, outcomes, or dates.`
             : `Write the ${monthLabel} Learning / Experience section using only the supplied ${monthLabel} monthly summary, user focus, daily entries, and that month's photos. Do not infer personal learning, feelings, skills, or growth from tasks or photos alone. Use learning or experience only when the user explicitly states it; otherwise ask for the missing reflection. Never use details from another month.`,
           outputUnit: options.unit,
           outputCount: options.count,
@@ -3592,7 +3592,7 @@ export default function Home() {
                     )}
                     <div className="mt-4 space-y-3 border-t border-slate-800 pt-4">
                       <label className="block text-xs font-semibold text-slate-300">
-                        Optional AI focus for {group.label}
+                        Optional AI guidance for {group.label}
                         <input
                           type="text"
                           value={group.generationFocus}
@@ -3612,9 +3612,12 @@ export default function Home() {
                                 )),
                               }
                             : current)}
-                          placeholder="Add this month’s details or reflection (optional)"
+                          placeholder="Optional emphasis; AI analyzes this month’s logged activities automatically"
                           className="mt-1.5 w-full rounded-xl border border-violet-400/25 bg-violet-500/[0.06] px-3 py-2.5 text-sm text-slate-100 placeholder:text-slate-500 focus:border-violet-400 focus:outline-none"
                         />
+                        <span className="mt-1 block font-normal text-slate-400">
+                          Leave blank to summarize the month from its daily entries.
+                        </span>
                       </label>
                       <div className="grid gap-3 sm:grid-cols-2">
                         <label className="block text-xs font-semibold text-slate-300">
