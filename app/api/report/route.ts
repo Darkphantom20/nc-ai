@@ -285,6 +285,9 @@ export async function POST(request: Request) {
       });
     }
 
+    const primeStartsAppendices = Boolean(
+      data.appendices?.primeNarrative && !data.appendices?.certParticipation,
+    );
     const remainingAppendixContent = buildOtherAppendixPages(data.appendices);
     if (remainingAppendixContent.length > 0) {
       documentSections.push({
@@ -302,7 +305,9 @@ export async function POST(request: Request) {
           }),
         },
         children: [
-          ...(!compactSectionLayout ? [new Paragraph({ pageBreakBefore: true })] : []),
+          ...(!compactSectionLayout && !primeStartsAppendices
+            ? [new Paragraph({ pageBreakBefore: true })]
+            : []),
           ...remainingAppendixContent,
         ],
       });
@@ -2149,11 +2154,13 @@ function buildOtherAppendixPages(appendicesData: AppendicesData) {
     const data = appendicesData[app.key];
     if (!data) return;
 
+    const pageBreakBeforeTitle = children.length === 0 && app.key === 'primeNarrative';
     if (children.length > 0) {
       children.push(new Paragraph({ pageBreakBefore: true }));
     }
     children.push(
       new Paragraph({
+        pageBreakBefore: pageBreakBeforeTitle,
         alignment: AlignmentType.CENTER,
         spacing: { before: 240, after: 240 },
         children: [new TextRun({ text: app.title, bold: true, size: 24, font: 'Times New Roman' })],
