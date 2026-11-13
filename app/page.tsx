@@ -201,7 +201,7 @@ const defaultForm = {
       }
     ],
     certParticipation: '',
-    primeNarrative: 'The PRIME seminar provided profound insights into professional workplace ethics and modern enterprise standards.',
+    primeNarrative: '',
     primeReportImages: [] as { base64: string; detail: string }[],
     resume: '',
     grades: '',
@@ -2203,7 +2203,7 @@ export default function Home() {
     'PRIME Report Narrative',
     'PRIME Report Narrative',
     currentText,
-    'Use the current PRIME text and generation focus for seminar facts. First- and second-placement details are supplied only as background to keep any directly relevant personal reflection accurate. Connect a placement detail to the seminar only when the user explicitly makes that connection; never present placement tasks as seminar activities or mix details between placements. Condense relevant facts instead of listing every task. Do not invent seminar dates, topics, speakers, activities, attendance, lessons, or personal outcomes. If no seminar details are supplied, ask the user to add them.',
+    'Write a concise, first-person PRIME narrative using the supplied placement report details and dated journal activities. Follow the sample style: introduce the PRIME training and placements, summarize each supplied placement’s actual office work separately, then close with only learning or personal outcomes explicitly supported by the supplied details. Condense related tasks without losing important duties, organization names, dates, or placement boundaries. Do not present this as a seminar narrative. Do not invent skills, teamwork, values, course connections, feelings, achievements, or gratitude; include them only when the user explicitly supplied them. Use the existing PRIME text and focus as additional user-provided context, not as permission to add unsupported facts.',
     options,
     buildPrimeNarrativeAIContext(form),
     defaultForm.appendices.primeNarrative,

@@ -286,15 +286,15 @@ export async function POST(request: Request) {
           key !== 'placementScope' && hasSourceDetails(value)
         ))
       : hasSourceDetails(body.sourceDetails);
-    if (primeNarrativeRequest && !currentText.trim() && !focus) {
+    if (!primeNarrativeRequest && !monthlyJournalRequest && !completedActionRequest && !currentText.trim() && !focus && !hasFactualSourceDetails) {
       return NextResponse.json(
-        { error: 'Add the PRIME seminar topics, activities, or personal details in the generation focus before generating this narrative.' },
+        { error: 'Add report details or a generation focus before generating this section.' },
         { status: 400 },
       );
     }
-    if (!monthlyJournalRequest && !completedActionRequest && !currentText.trim() && !focus && !hasFactualSourceDetails) {
+    if (primeNarrativeRequest && !currentText.trim() && !focus && !hasFactualSourceDetails) {
       return NextResponse.json(
-        { error: 'Add report details or a generation focus before generating this section.' },
+        { error: 'Add first- or second-placement details, journal activities, or a generation focus before generating the PRIME narrative.' },
         { status: 400 },
       );
     }
@@ -339,7 +339,7 @@ export async function POST(request: Request) {
             : monthlyJournalRequest
           ? 'Use only facts directly supported by the selected month’s supplied daily entries, monthly summary, attached photos, or explicitly provided user focus; do not rely on other months, outside knowledge, or assumptions.'
           : primeNarrativeRequest
-          ? 'Use the PRIME text and focus as evidence for seminar-specific facts. Use first- and second-placement details only as context for a personal reflection when the user explicitly connects them to the seminar; do not treat placement data as evidence of seminar events or outcomes.'
+          ? 'For this PRIME narrative, use the supplied first- and second-placement details and dated journal activities as the primary factual sources. Keep the two placements distinct, preserve the correct organization and dates, and condense related work into a coherent first-person OJT narrative. Use explicit reflection details when supplied; never infer skills, course connections, feelings, achievements, or gratitude from tasks alone.'
           : schoolPlacementRequest
           ? 'Use only the current second-placement section text, optional user focus, and supplied second-placement details as factual evidence. Use related fields only when directly relevant; do not use or assume facts from the first placement.'
           : 'Use only the current section text, the optional user focus, and source details supplied below as factual evidence. The weeklyJournal entries and monthlyJournal summaries and entries are the primary sources for the student’s actual work; base relevant tasks, duties, procedures, problems, actions, results, lessons, and reflections on them. Other user-provided sections are supporting context: use them only when directly relevant and never let generic sample text override the journal.',
@@ -354,7 +354,7 @@ export async function POST(request: Request) {
         ? 'For acknowledgements, use related task details to align the wording with the user’s actual experience. Never invent who is being thanked or claim anyone provided support unless the source explicitly names them and their contribution. If no recipient and contribution are supplied, do not express thanks or claim guidance, support, opportunity, growth, or learning; use neutral statements grounded only in supplied work facts, and include a sentence asking the user to add the names and contributions they want acknowledged. Do not treat a role, workplace, branch, or organization as an acknowledgement recipient unless explicitly identified as one.'
         : '',
       primeNarrativeRequest
-        ? 'For a PRIME seminar narrative, use the current text and user focus as the source for seminar topics, activities, speakers, dates, and attendance. Source details may also contain separate first- and second-placement sections and dated journal activities; use these only as background for a personal reflection when the user explicitly connects them to the seminar. Keep both placements distinct, do not present OJT tasks as seminar activities, and condense only relevant details instead of listing all placement tasks. Never infer seminar attendance, topics, learning, skills, or outcomes from placement data. If seminar details are missing, ask for them. Uploaded files and photos are not evidence for this request.'
+        ? 'For the PRIME narrative, summarize the student’s actual PRIME training experience across the supplied placements in the style of a concise academic narrative. Open with a brief overview, describe each placement separately using its organization details and dated journal activities, and conclude only with explicitly supported learning or outcomes. Combine related tasks to make the narrative readable, but preserve important specifics and never move an activity, date, achievement, or reflection from one placement to the other. The PRIME text and focus may add user-provided facts. Do not invent seminar content, attendance, skills, teamwork, course connections, feelings, achievements, or gratitude. Do not refer to the student as “the user” or say “the user stated.” If the available placement details are insufficient, state what needs to be added instead of guessing.'
         : '',
       /background|vision|mission|objectives|core values|products and services|services/i.test(title)
         ? 'For organization background and official vision, mission, objectives, core-value, product, or service statements, use only explicit source details. Do not guess from the organization name, location, field, or common practice. If no details are supplied, briefly ask the user for the official or factual information needed.'
