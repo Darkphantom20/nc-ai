@@ -372,7 +372,7 @@ function getCoverPageLayout(
   charactersPerLine: number,
   baseFontSize: number,
   baseAfterSpacing: number,
-): { fontSize: number; lineSpacing: number; spacingScale: number } {
+): { fontSize: number; lineSpacing: number; spacingScale: number; topSpacing: number } {
   const estimatedLines = texts.reduce((total, text) => (
     total + text.split(/\r?\n/).reduce(
       (lineTotal, line) => lineTotal + Math.max(1, Math.ceil(line.length / charactersPerLine)),
@@ -387,16 +387,19 @@ function getCoverPageLayout(
       : baseFontSize;
   const lineSpacing = wrappedLines > 4 ? 280 : wrappedLines > 0 ? 320 : 360;
   const availableHeight = 20163 - (1440 * 2);
+  const targetHeight = Math.round(availableHeight * 0.9);
   const estimatedTextHeight = estimatedLines * lineSpacing;
   const spacingScale = Math.min(
-    1.35,
-    Math.max(0.25, (availableHeight - estimatedTextHeight) / (1440 + baseAfterSpacing)),
+    1,
+    Math.max(0.25, (targetHeight - estimatedTextHeight) / (1440 + baseAfterSpacing)),
   );
+  const usedHeight = estimatedTextHeight + spacingScale * (1440 + baseAfterSpacing);
 
   return {
     fontSize,
     lineSpacing,
     spacingScale,
+    topSpacing: Math.max(0, Math.floor((availableHeight - usedHeight) / 2)),
   };
 }
 
@@ -429,27 +432,32 @@ function buildTemplateCoverPage(data: any): Paragraph[] {
     data.submittedToTitle || '',
   ], 58, 32, 9000);
   const scaleSpacing = (spacing: number) => Math.round(spacing * coverPageLayout.spacingScale);
+  let firstParagraph = true;
 
   const centered = (text: string, options: {
     before?: number;
     after?: number;
     bold?: boolean;
     size?: number;
-  } = {}) => new Paragraph({
-    alignment: AlignmentType.CENTER,
-    spacing: {
-      before: scaleSpacing(options.before ?? 0),
-      after: scaleSpacing(options.after ?? 360),
-      line: coverPageLayout.lineSpacing,
-      lineRule: 'auto',
-    },
-    children: [new TextRun({
-      text,
-      bold: options.bold ?? false,
-      size: Math.min(options.size ?? 32, coverPageLayout.fontSize),
-      font: 'Times New Roman',
-    })],
-  });
+  } = {}) => {
+    const before = scaleSpacing(options.before ?? 0) + (firstParagraph ? coverPageLayout.topSpacing : 0);
+    firstParagraph = false;
+    return new Paragraph({
+      alignment: AlignmentType.CENTER,
+      spacing: {
+        before,
+        after: scaleSpacing(options.after ?? 360),
+        line: coverPageLayout.lineSpacing,
+        lineRule: 'auto',
+      },
+      children: [new TextRun({
+        text,
+        bold: options.bold ?? false,
+        size: Math.min(options.size ?? 32, coverPageLayout.fontSize),
+        font: 'Times New Roman',
+      })],
+    });
+  };
 
   return [
     centered('A Narrative Report on the', { before: 1440, after: 120, size: 32 }),
@@ -1052,7 +1060,12 @@ function buildCoverPage(data: any): Paragraph[] {
   return [
     new Paragraph({
       alignment: AlignmentType.CENTER,
-      spacing: { before: scaleSpacing(1440), after: scaleSpacing(360), line: coverPageLayout.lineSpacing, lineRule: 'auto' },
+      spacing: {
+        before: scaleSpacing(1440) + coverPageLayout.topSpacing,
+        after: scaleSpacing(360),
+        line: coverPageLayout.lineSpacing,
+        lineRule: 'auto',
+      },
       children: [new TextRun({ text: 'A Narrative Report on the', size: coverPageLayout.fontSize, font: 'Times New Roman', bold: false })],
     }),
     new Paragraph({
