@@ -371,6 +371,7 @@ function getCoverPageLayout(
   texts: string[],
   charactersPerLine: number,
   baseFontSize: number,
+  baseAfterSpacing: number,
 ): { fontSize: number; lineSpacing: number; spacingScale: number } {
   const estimatedLines = texts.reduce((total, text) => (
     total + text.split(/\r?\n/).reduce(
@@ -379,20 +380,23 @@ function getCoverPageLayout(
     )
   ), 0);
   const wrappedLines = estimatedLines - texts.length;
-  if (wrappedLines === 0) {
-    return { fontSize: baseFontSize, lineSpacing: 360, spacingScale: 1 };
-  }
-  if (wrappedLines <= 4) {
-    return {
-      fontSize: Math.min(baseFontSize, 28),
-      lineSpacing: 320,
-      spacingScale: 0.55,
-    };
-  }
+  const fontSize = wrappedLines > 4
+    ? Math.min(baseFontSize, 24)
+    : wrappedLines > 0
+      ? Math.min(baseFontSize, 28)
+      : baseFontSize;
+  const lineSpacing = wrappedLines > 4 ? 280 : wrappedLines > 0 ? 320 : 360;
+  const availableHeight = 20163 - (1440 * 2);
+  const estimatedTextHeight = estimatedLines * lineSpacing;
+  const spacingScale = Math.min(
+    1.35,
+    Math.max(0.25, (availableHeight - estimatedTextHeight) / (1440 + baseAfterSpacing)),
+  );
+
   return {
-    fontSize: Math.min(baseFontSize, 24),
-    lineSpacing: 280,
-    spacingScale: 0.35,
+    fontSize,
+    lineSpacing,
+    spacingScale,
   };
 }
 
@@ -423,7 +427,7 @@ function buildTemplateCoverPage(data: any): Paragraph[] {
     'Submitted to:',
     data.submittedToName || '',
     data.submittedToTitle || '',
-  ], 58, 32);
+  ], 58, 32, 9000);
   const scaleSpacing = (spacing: number) => Math.round(spacing * coverPageLayout.spacingScale);
 
   const centered = (text: string, options: {
@@ -1042,7 +1046,7 @@ function buildCoverPage(data: any): Paragraph[] {
     'Submitted to:',
     adviserName,
     adviserTitle,
-  ], 90, 20);
+  ], 90, 20, 8460);
   const scaleSpacing = (spacing: number) => Math.round(spacing * coverPageLayout.spacingScale);
 
   return [

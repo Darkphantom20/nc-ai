@@ -5138,16 +5138,18 @@ export default function Home() {
                               </button>
                             </div>
                           </header>
+                          <p className="text-xs text-slate-400">
+                            All months are editable. These values are calculated from daily entries by default; clear an override to restore the calculated value.
+                          </p>
                           <div className="grid gap-3 sm:grid-cols-2">
                             <label className="block text-xs font-semibold text-slate-300">
                               Period Covered
                               <input
                                 type="text"
                                 value={month.periodCovered}
-                                readOnly={month.activities.length > 0}
                                 onChange={(event) => updateMonthlyJournalSummary(month.key, 'periodCovered', event.target.value)}
                                 placeholder="e.g. June 23-30, 2026"
-                                className={`${fieldClass} read-only:cursor-default read-only:opacity-80`}
+                                className={fieldClass}
                               />
                             </label>
                             <div className="grid grid-cols-2 gap-3">
@@ -5156,9 +5158,8 @@ export default function Home() {
                                 <input
                                   type="text"
                                   value={month.actualDutyDays}
-                                  readOnly={month.activities.length > 0}
                                   onChange={(event) => updateMonthlyJournalSummary(month.key, 'actualDutyDays', event.target.value)}
-                                  className={`${fieldClass} read-only:cursor-default read-only:opacity-80`}
+                                  className={fieldClass}
                                 />
                               </label>
                               <label className="block text-xs font-semibold text-slate-300">
@@ -5166,9 +5167,8 @@ export default function Home() {
                                 <input
                                   type="text"
                                   value={month.totalHoursRendered}
-                                  readOnly={month.activities.length > 0}
                                   onChange={(event) => updateMonthlyJournalSummary(month.key, 'totalHoursRendered', event.target.value)}
-                                  className={`${fieldClass} read-only:cursor-default read-only:opacity-80`}
+                                  className={fieldClass}
                                 />
                               </label>
                             </div>

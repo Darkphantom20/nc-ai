@@ -296,11 +296,11 @@ export function getMonthlyJournalGroups(
 
       return {
         ...group,
-        periodCovered: group.activities.length ? periodCovered : summary.periodCovered ?? '',
-        actualDutyDays: group.activities.length ? String(uniqueDutyDates.size) : summary.actualDutyDays ?? '',
-        totalHoursRendered: group.activities.length
-          ? String(Number(totalHours.toFixed(2)))
-          : summary.totalHoursRendered ?? '',
+        periodCovered: summary.periodCovered || (group.activities.length ? periodCovered : ''),
+        actualDutyDays: summary.actualDutyDays || (group.activities.length ? String(uniqueDutyDates.size) : ''),
+        totalHoursRendered: summary.totalHoursRendered || (
+          group.activities.length ? String(Number(totalHours.toFixed(2))) : ''
+        ),
         activitiesPerformed: summary.activitiesPerformed ?? '',
         learningExperience: summary.learningExperience ?? '',
       };
