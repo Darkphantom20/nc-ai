@@ -367,6 +367,35 @@ function templateParagraph(text: string, options: {
   return [paragraph];
 }
 
+function getCoverPageLayout(
+  texts: string[],
+  charactersPerLine: number,
+  baseFontSize: number,
+): { fontSize: number; lineSpacing: number; spacingScale: number } {
+  const estimatedLines = texts.reduce((total, text) => (
+    total + text.split(/\r?\n/).reduce(
+      (lineTotal, line) => lineTotal + Math.max(1, Math.ceil(line.length / charactersPerLine)),
+      0,
+    )
+  ), 0);
+  const wrappedLines = estimatedLines - texts.length;
+  if (wrappedLines === 0) {
+    return { fontSize: baseFontSize, lineSpacing: 360, spacingScale: 1 };
+  }
+  if (wrappedLines <= 4) {
+    return {
+      fontSize: Math.min(baseFontSize, 28),
+      lineSpacing: 320,
+      spacingScale: 0.55,
+    };
+  }
+  return {
+    fontSize: Math.min(baseFontSize, 24),
+    lineSpacing: 280,
+    spacingScale: 0.35,
+  };
+}
+
 function buildTemplateCoverPage(data: any): Paragraph[] {
   const placementOrganizations = [
     data.trainingOrganization,
@@ -376,25 +405,44 @@ function buildTemplateCoverPage(data: any): Paragraph[] {
     data.trainingLocation,
     data.schoolPlacement?.enabled ? data.schoolPlacement.trainingLocation : '',
   ].filter(Boolean);
+  const degreeAndYear = `${data.degreeProgram || ''}${data.studentYear ? ` - ${data.studentYear}` : ''}`;
+  const coverPageLayout = getCoverPageLayout([
+    'A Narrative Report on the',
+    'On-the-Job Training conducted at',
+    placementOrganizations.join(' and '),
+    placementLocations.join(' and '),
+    'Presented to the faculty of',
+    data.collegeFaculty || '',
+    'In partial fulfillment of the requirements for the degree of',
+    data.degreeProgram || '',
+    'Training Duration:',
+    data.trainingDuration || '',
+    'Submitted by:',
+    data.studentName || '',
+    degreeAndYear,
+    'Submitted to:',
+    data.submittedToName || '',
+    data.submittedToTitle || '',
+  ], 58, 32);
+  const scaleSpacing = (spacing: number) => Math.round(spacing * coverPageLayout.spacingScale);
 
   const centered = (text: string, options: {
     before?: number;
     after?: number;
     bold?: boolean;
     size?: number;
-    line?: number;
   } = {}) => new Paragraph({
     alignment: AlignmentType.CENTER,
     spacing: {
-      before: options.before ?? 0,
-      after: options.after ?? 360,
-      line: options.line ?? 360,
+      before: scaleSpacing(options.before ?? 0),
+      after: scaleSpacing(options.after ?? 360),
+      line: coverPageLayout.lineSpacing,
       lineRule: 'auto',
     },
     children: [new TextRun({
       text,
       bold: options.bold ?? false,
-      size: options.size ?? 32,
+      size: Math.min(options.size ?? 32, coverPageLayout.fontSize),
       font: 'Times New Roman',
     })],
   });
@@ -412,7 +460,7 @@ function buildTemplateCoverPage(data: any): Paragraph[] {
     centered(data.trainingDuration || '', { after: 1200, size: 32 }),
     centered('Submitted by:', { after: 120, size: 32 }),
     centered(data.studentName || '', { bold: true, after: 120, size: 32 }),
-    centered(`${data.degreeProgram || ''}${data.studentYear ? ` - ${data.studentYear}` : ''}`, { after: 1440, size: 32 }),
+    centered(degreeAndYear, { after: 1440, size: 32 }),
     centered('Submitted to:', { after: 120, size: 32 }),
     centered(data.submittedToName || '', { bold: true, after: 120, size: 32 }),
     centered(data.submittedToTitle || '', { after: 0, size: 32 }),
@@ -979,78 +1027,94 @@ function buildCoverPage(data: any): Paragraph[] {
   const studentDegree = data.degreeProgram || '';
   const adviserName = data.submittedToName || '';
   const adviserTitle = data.submittedToTitle || '';
-  const FRONT_PAGE_TEXT_SIZE = 20;
+  const coverPageLayout = getCoverPageLayout([
+    'A Narrative Report on the',
+    'On-the-Job Training conducted at',
+    org,
+    location,
+    'Presented to the faculty of',
+    faculty,
+    'In partial fulfillment of the requirements for the degree of',
+    degree,
+    'Submitted by:',
+    student,
+    studentDegree,
+    'Submitted to:',
+    adviserName,
+    adviserTitle,
+  ], 90, 20);
+  const scaleSpacing = (spacing: number) => Math.round(spacing * coverPageLayout.spacingScale);
 
   return [
     new Paragraph({
       alignment: AlignmentType.CENTER,
-      spacing: { before: 1440, after: 360 },
-      children: [new TextRun({ text: 'A Narrative Report on the', size: FRONT_PAGE_TEXT_SIZE, font: 'Times New Roman', bold: false })],
+      spacing: { before: scaleSpacing(1440), after: scaleSpacing(360), line: coverPageLayout.lineSpacing, lineRule: 'auto' },
+      children: [new TextRun({ text: 'A Narrative Report on the', size: coverPageLayout.fontSize, font: 'Times New Roman', bold: false })],
     }),
     new Paragraph({
       alignment: AlignmentType.CENTER,
-      spacing: { after: 360, line: 360, lineRule: 'auto' },
-      children: [new TextRun({ text: 'On-the-Job Training conducted at', size: FRONT_PAGE_TEXT_SIZE, font: 'Times New Roman', bold: false })],
+      spacing: { after: scaleSpacing(360), line: coverPageLayout.lineSpacing, lineRule: 'auto' },
+      children: [new TextRun({ text: 'On-the-Job Training conducted at', size: coverPageLayout.fontSize, font: 'Times New Roman', bold: false })],
     }),
     new Paragraph({
       alignment: AlignmentType.CENTER,
-      spacing: { after: 180, line: 360, lineRule: 'auto' },
-      children: [new TextRun({ text: org, size: FRONT_PAGE_TEXT_SIZE, font: 'Times New Roman', bold: false })],
+      spacing: { after: scaleSpacing(180), line: coverPageLayout.lineSpacing, lineRule: 'auto' },
+      children: [new TextRun({ text: org, size: coverPageLayout.fontSize, font: 'Times New Roman', bold: false })],
     }),
     new Paragraph({
       alignment: AlignmentType.CENTER,
-      spacing: { after: 1440, line: 360, lineRule: 'auto' },
-      children: [new TextRun({ text: location, size: FRONT_PAGE_TEXT_SIZE, font: 'Times New Roman', bold: false })],
+      spacing: { after: scaleSpacing(1440), line: coverPageLayout.lineSpacing, lineRule: 'auto' },
+      children: [new TextRun({ text: location, size: coverPageLayout.fontSize, font: 'Times New Roman', bold: false })],
     }),
     new Paragraph({
       alignment: AlignmentType.CENTER,
-      spacing: { after: 360, line: 360, lineRule: 'auto' },
-      children: [new TextRun({ text: 'Presented to the faculty of', size: FRONT_PAGE_TEXT_SIZE, font: 'Times New Roman', bold: false })],
+      spacing: { after: scaleSpacing(360), line: coverPageLayout.lineSpacing, lineRule: 'auto' },
+      children: [new TextRun({ text: 'Presented to the faculty of', size: coverPageLayout.fontSize, font: 'Times New Roman', bold: false })],
     }),
     new Paragraph({
       alignment: AlignmentType.CENTER,
-      spacing: { after: 1440, line: 360, lineRule: 'auto' },
-      children: [new TextRun({ text: faculty, size: FRONT_PAGE_TEXT_SIZE, font: 'Times New Roman', bold: false })],
+      spacing: { after: scaleSpacing(1440), line: coverPageLayout.lineSpacing, lineRule: 'auto' },
+      children: [new TextRun({ text: faculty, size: coverPageLayout.fontSize, font: 'Times New Roman', bold: false })],
     }),
     new Paragraph({
       alignment: AlignmentType.CENTER,
-      spacing: { after: 360, line: 360, lineRule: 'auto' },
-      children: [new TextRun({ text: 'In partial fulfillment of the requirements for the degree of', size: FRONT_PAGE_TEXT_SIZE, font: 'Times New Roman', bold: false })],
+      spacing: { after: scaleSpacing(360), line: coverPageLayout.lineSpacing, lineRule: 'auto' },
+      children: [new TextRun({ text: 'In partial fulfillment of the requirements for the degree of', size: coverPageLayout.fontSize, font: 'Times New Roman', bold: false })],
     }),
     new Paragraph({
       alignment: AlignmentType.CENTER,
-      spacing: { after: 2160, line: 360, lineRule: 'auto' },
-      children: [new TextRun({ text: degree, size: FRONT_PAGE_TEXT_SIZE, font: 'Times New Roman', bold: false })],
+      spacing: { after: scaleSpacing(2160), line: coverPageLayout.lineSpacing, lineRule: 'auto' },
+      children: [new TextRun({ text: degree, size: coverPageLayout.fontSize, font: 'Times New Roman', bold: false })],
     }),
     new Paragraph({
       alignment: AlignmentType.CENTER,
-      spacing: { after: 180, line: 360, lineRule: 'auto' },
-      children: [new TextRun({ text: 'Submitted by:', size: FRONT_PAGE_TEXT_SIZE, font: 'Times New Roman', bold: false })],
+      spacing: { after: scaleSpacing(180), line: coverPageLayout.lineSpacing, lineRule: 'auto' },
+      children: [new TextRun({ text: 'Submitted by:', size: coverPageLayout.fontSize, font: 'Times New Roman', bold: false })],
     }),
     new Paragraph({
       alignment: AlignmentType.CENTER,
-      spacing: { after: 180, line: 360, lineRule: 'auto' },
-      children: [new TextRun({ text: student, size: FRONT_PAGE_TEXT_SIZE, font: 'Times New Roman', bold: false })],
+      spacing: { after: scaleSpacing(180), line: coverPageLayout.lineSpacing, lineRule: 'auto' },
+      children: [new TextRun({ text: student, size: coverPageLayout.fontSize, font: 'Times New Roman', bold: false })],
     }),
     new Paragraph({
       alignment: AlignmentType.CENTER,
-      spacing: { after: 1080, line: 360, lineRule: 'auto' },
-      children: [new TextRun({ text: studentDegree, size: FRONT_PAGE_TEXT_SIZE, font: 'Times New Roman', bold: false })],
+      spacing: { after: scaleSpacing(1080), line: coverPageLayout.lineSpacing, lineRule: 'auto' },
+      children: [new TextRun({ text: studentDegree, size: coverPageLayout.fontSize, font: 'Times New Roman', bold: false })],
     }),
     new Paragraph({
       alignment: AlignmentType.CENTER,
-      spacing: { after: 180, line: 360, lineRule: 'auto' },
-      children: [new TextRun({ text: 'Submitted to:', size: FRONT_PAGE_TEXT_SIZE, font: 'Times New Roman', bold: false })],
+      spacing: { after: scaleSpacing(180), line: coverPageLayout.lineSpacing, lineRule: 'auto' },
+      children: [new TextRun({ text: 'Submitted to:', size: coverPageLayout.fontSize, font: 'Times New Roman', bold: false })],
     }),
     new Paragraph({
       alignment: AlignmentType.CENTER,
-      spacing: { after: 180, line: 360, lineRule: 'auto' },
-      children: [new TextRun({ text: adviserName, size: FRONT_PAGE_TEXT_SIZE, font: 'Times New Roman', bold: false })],
+      spacing: { after: scaleSpacing(180), line: coverPageLayout.lineSpacing, lineRule: 'auto' },
+      children: [new TextRun({ text: adviserName, size: coverPageLayout.fontSize, font: 'Times New Roman', bold: false })],
     }),
     new Paragraph({
       alignment: AlignmentType.CENTER,
-      spacing: { after: 0, line: 360, lineRule: 'auto' },
-      children: [new TextRun({ text: adviserTitle, size: FRONT_PAGE_TEXT_SIZE, font: 'Times New Roman', bold: false })],
+      spacing: { after: 0, line: coverPageLayout.lineSpacing, lineRule: 'auto' },
+      children: [new TextRun({ text: adviserTitle, size: coverPageLayout.fontSize, font: 'Times New Roman', bold: false })],
     }),
   ];
 }
