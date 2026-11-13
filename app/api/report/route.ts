@@ -372,7 +372,7 @@ function getCoverPageLayout(
   charactersPerLine: number,
   baseFontSize: number,
   baseAfterSpacing: number,
-): { fontSize: number; lineSpacing: number; spacingScale: number; topSpacing: number } {
+): { fontSize: number; lineSpacing: number; spacingScale: number } {
   const estimatedLines = texts.reduce((total, text) => (
     total + text.split(/\r?\n/).reduce(
       (lineTotal, line) => lineTotal + Math.max(1, Math.ceil(line.length / charactersPerLine)),
@@ -387,19 +387,17 @@ function getCoverPageLayout(
       : baseFontSize;
   const lineSpacing = wrappedLines > 4 ? 280 : wrappedLines > 0 ? 320 : 360;
   const availableHeight = 20163 - (1440 * 2);
-  const targetHeight = Math.round(availableHeight * 0.9);
+  const targetHeight = Math.round(availableHeight * 0.72);
   const estimatedTextHeight = estimatedLines * lineSpacing;
   const spacingScale = Math.min(
     1,
     Math.max(0.25, (targetHeight - estimatedTextHeight) / (1440 + baseAfterSpacing)),
   );
-  const usedHeight = estimatedTextHeight + spacingScale * (1440 + baseAfterSpacing);
 
   return {
     fontSize,
     lineSpacing,
     spacingScale,
-    topSpacing: Math.max(0, Math.floor((availableHeight - usedHeight) / 2)),
   };
 }
 
@@ -432,7 +430,7 @@ function buildTemplateCoverPage(data: any): Paragraph[] {
     data.submittedToTitle || '',
   ], 58, 32, 9000);
   const scaleSpacing = (spacing: number) => Math.round(spacing * coverPageLayout.spacingScale);
-  let firstParagraph = true;
+  let paragraphIndex = 0;
 
   const centered = (text: string, options: {
     before?: number;
@@ -440,12 +438,14 @@ function buildTemplateCoverPage(data: any): Paragraph[] {
     bold?: boolean;
     size?: number;
   } = {}) => {
-    const before = scaleSpacing(options.before ?? 0) + (firstParagraph ? coverPageLayout.topSpacing : 0);
-    firstParagraph = false;
+    const keepNext = paragraphIndex < 15;
+    paragraphIndex += 1;
     return new Paragraph({
+      keepNext,
+      keepLines: true,
       alignment: AlignmentType.CENTER,
       spacing: {
-        before,
+        before: scaleSpacing(options.before ?? 0),
         after: scaleSpacing(options.after ?? 360),
         line: coverPageLayout.lineSpacing,
         lineRule: 'auto',
@@ -1059,76 +1059,98 @@ function buildCoverPage(data: any): Paragraph[] {
 
   return [
     new Paragraph({
+      keepNext: true,
+      keepLines: true,
       alignment: AlignmentType.CENTER,
-      spacing: {
-        before: scaleSpacing(1440) + coverPageLayout.topSpacing,
-        after: scaleSpacing(360),
-        line: coverPageLayout.lineSpacing,
-        lineRule: 'auto',
-      },
+      spacing: { before: scaleSpacing(1440), after: scaleSpacing(360), line: coverPageLayout.lineSpacing, lineRule: 'auto' },
       children: [new TextRun({ text: 'A Narrative Report on the', size: coverPageLayout.fontSize, font: 'Times New Roman', bold: false })],
     }),
     new Paragraph({
+      keepNext: true,
+      keepLines: true,
       alignment: AlignmentType.CENTER,
       spacing: { after: scaleSpacing(360), line: coverPageLayout.lineSpacing, lineRule: 'auto' },
       children: [new TextRun({ text: 'On-the-Job Training conducted at', size: coverPageLayout.fontSize, font: 'Times New Roman', bold: false })],
     }),
     new Paragraph({
+      keepNext: true,
+      keepLines: true,
       alignment: AlignmentType.CENTER,
       spacing: { after: scaleSpacing(180), line: coverPageLayout.lineSpacing, lineRule: 'auto' },
       children: [new TextRun({ text: org, size: coverPageLayout.fontSize, font: 'Times New Roman', bold: false })],
     }),
     new Paragraph({
+      keepNext: true,
+      keepLines: true,
       alignment: AlignmentType.CENTER,
       spacing: { after: scaleSpacing(1440), line: coverPageLayout.lineSpacing, lineRule: 'auto' },
       children: [new TextRun({ text: location, size: coverPageLayout.fontSize, font: 'Times New Roman', bold: false })],
     }),
     new Paragraph({
+      keepNext: true,
+      keepLines: true,
       alignment: AlignmentType.CENTER,
       spacing: { after: scaleSpacing(360), line: coverPageLayout.lineSpacing, lineRule: 'auto' },
       children: [new TextRun({ text: 'Presented to the faculty of', size: coverPageLayout.fontSize, font: 'Times New Roman', bold: false })],
     }),
     new Paragraph({
+      keepNext: true,
+      keepLines: true,
       alignment: AlignmentType.CENTER,
       spacing: { after: scaleSpacing(1440), line: coverPageLayout.lineSpacing, lineRule: 'auto' },
       children: [new TextRun({ text: faculty, size: coverPageLayout.fontSize, font: 'Times New Roman', bold: false })],
     }),
     new Paragraph({
+      keepNext: true,
+      keepLines: true,
       alignment: AlignmentType.CENTER,
       spacing: { after: scaleSpacing(360), line: coverPageLayout.lineSpacing, lineRule: 'auto' },
       children: [new TextRun({ text: 'In partial fulfillment of the requirements for the degree of', size: coverPageLayout.fontSize, font: 'Times New Roman', bold: false })],
     }),
     new Paragraph({
+      keepNext: true,
+      keepLines: true,
       alignment: AlignmentType.CENTER,
       spacing: { after: scaleSpacing(2160), line: coverPageLayout.lineSpacing, lineRule: 'auto' },
       children: [new TextRun({ text: degree, size: coverPageLayout.fontSize, font: 'Times New Roman', bold: false })],
     }),
     new Paragraph({
+      keepNext: true,
+      keepLines: true,
       alignment: AlignmentType.CENTER,
       spacing: { after: scaleSpacing(180), line: coverPageLayout.lineSpacing, lineRule: 'auto' },
       children: [new TextRun({ text: 'Submitted by:', size: coverPageLayout.fontSize, font: 'Times New Roman', bold: false })],
     }),
     new Paragraph({
+      keepNext: true,
+      keepLines: true,
       alignment: AlignmentType.CENTER,
       spacing: { after: scaleSpacing(180), line: coverPageLayout.lineSpacing, lineRule: 'auto' },
       children: [new TextRun({ text: student, size: coverPageLayout.fontSize, font: 'Times New Roman', bold: false })],
     }),
     new Paragraph({
+      keepNext: true,
+      keepLines: true,
       alignment: AlignmentType.CENTER,
       spacing: { after: scaleSpacing(1080), line: coverPageLayout.lineSpacing, lineRule: 'auto' },
       children: [new TextRun({ text: studentDegree, size: coverPageLayout.fontSize, font: 'Times New Roman', bold: false })],
     }),
     new Paragraph({
+      keepNext: true,
+      keepLines: true,
       alignment: AlignmentType.CENTER,
       spacing: { after: scaleSpacing(180), line: coverPageLayout.lineSpacing, lineRule: 'auto' },
       children: [new TextRun({ text: 'Submitted to:', size: coverPageLayout.fontSize, font: 'Times New Roman', bold: false })],
     }),
     new Paragraph({
+      keepNext: true,
+      keepLines: true,
       alignment: AlignmentType.CENTER,
       spacing: { after: scaleSpacing(180), line: coverPageLayout.lineSpacing, lineRule: 'auto' },
       children: [new TextRun({ text: adviserName, size: coverPageLayout.fontSize, font: 'Times New Roman', bold: false })],
     }),
     new Paragraph({
+      keepLines: true,
       alignment: AlignmentType.CENTER,
       spacing: { after: 0, line: coverPageLayout.lineSpacing, lineRule: 'auto' },
       children: [new TextRun({ text: adviserTitle, size: coverPageLayout.fontSize, font: 'Times New Roman', bold: false })],
