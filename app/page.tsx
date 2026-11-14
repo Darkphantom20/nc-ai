@@ -5607,13 +5607,13 @@ export default function Home() {
                       rows={4}
                       onGenerate={(topic) => generatePrimeNarrativeWithAI(form.appendices.primeNarrative, topic)}
                       generating={aiGenerating === 'primeNarrative'}
-                      generationFocusPlaceholder="Add your event details, personal notes, or keywords to make your narrative specific."
+                      generationFocusPlaceholder="Add the event name, organizer, date, venue, theme, speaker/topic, activities, and your own takeaway as available."
                       generationExamples={[
                         {
                           id: 'event-reflection',
                           title: 'Event or seminar',
-                          description: 'A structure for describing a shared event through your own takeaways.',
-                          sample: 'At [event] on [date], we discussed [specific topic]. One point I want to highlight is [your own takeaway], because [why it mattered to you].',
+                          description: 'Use the details you know; leave out anything you cannot verify.',
+                          sample: '[Organizer] held [event name] on [date] at [venue] under the theme [theme]. [Speaker and role] discussed [documented topic or advice]. The program included [documented activity or awarding]. I found [your own takeaway] relevant to my internship because [your stated reason].',
                         },
                         {
                           id: 'personal-experience',
