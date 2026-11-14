@@ -613,6 +613,9 @@ function buildSchoolPlacementAIContext(
 
 function buildPrimeNarrativeAIContext(form: NarrativeForm): Record<string, unknown> {
   const fieldKeys = Object.keys(aiNarrativeFieldLabels) as AiNarrativeFieldKey[];
+  const degreeProgram = userProvidedText(form.degreeProgram, defaultForm.degreeProgram, 200);
+  const studentYear = userProvidedText(form.studentYear, defaultForm.studentYear, 60);
+  const trainingDuration = userProvidedText(form.trainingDuration, defaultForm.trainingDuration, 150);
   const firstOrganization = userProvidedText(
     form.trainingOrganization,
     defaultForm.trainingOrganization,
@@ -626,6 +629,9 @@ function buildPrimeNarrativeAIContext(form: NarrativeForm): Record<string, unkno
     }),
   );
   const firstPlacement = {
+    ...(degreeProgram ? { degreeProgram } : {}),
+    ...(studentYear ? { studentYear } : {}),
+    ...(trainingDuration ? { trainingDuration } : {}),
     ...(firstOrganization ? { organization: firstOrganization } : {}),
     ...(firstLocation ? { location: firstLocation } : {}),
     ...(form.schoolPlacement.firstPlacementEndDate
@@ -5611,9 +5617,9 @@ export default function Home() {
                         },
                         {
                           id: 'personal-experience',
-                          title: 'Personal experience',
-                          description: 'A structure for connecting an event to your own preparation or placement.',
-                          sample: 'During [specific activity], I [what you personally did]. This connected with my experience at [placement or office] when I [documented task or detail].',
+                          title: 'Internship experience',
+                          description: 'A structure for summarizing your own placements, actual duties, and supported learning.',
+                          sample: 'My training took place at [your office or organization(s)]. At [placement], I [tasks recorded in my report]; at [another placement, if applicable], I [your documented tasks]. These experiences helped me [skill or lesson you personally identified]. Overall, [your own reflection].',
                         },
                       ]}
                     />
