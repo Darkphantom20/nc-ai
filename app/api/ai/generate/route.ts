@@ -10,6 +10,10 @@ export const runtime = 'nodejs';
 
 const providerTimeoutMs = 45_000;
 type Provider = 'groq' | 'gemini' | 'deepseek' | 'cloudflare';
+const primeExampleStyleInstructions: Record<string, string> = {
+  'event-reflection': 'event sequence: identify the supplied event and date, summarize only documented topics, then connect one explicitly supplied personal takeaway to its stated relevance.',
+  'personal-experience': 'personal-experience sequence: connect a supplied activity to a specific documented placement duty or personal preparation detail, without implying a connection the student did not provide.',
+};
 
 const exhaustedUntil = new Map<string, number>();
 let providerCursor = 0;
@@ -166,6 +170,22 @@ export async function POST(request: Request) {
     const monthlyImageJournalRequest = hasImages && monthlyJournalRequest;
     const acknowledgementRequest = /acknowledg(?:e)?ment/i.test(title);
     const primeNarrativeRequest = /prime report narrative/i.test(title);
+    const rawPrimeExampleStyles = body.primeExampleStyles;
+    if (rawPrimeExampleStyles !== undefined
+      && (!Array.isArray(rawPrimeExampleStyles)
+        || rawPrimeExampleStyles.length > 2
+        || rawPrimeExampleStyles.some((style) => (
+          typeof style !== 'string' || !Object.hasOwn(primeExampleStyleInstructions, style)
+        )))) {
+      return NextResponse.json({ error: 'Choose up to two valid PRIME example styles.' }, { status: 400 });
+    }
+    const selectedPrimeExampleStyles = primeNarrativeRequest && Array.isArray(rawPrimeExampleStyles)
+      ? Array.from(new Set(rawPrimeExampleStyles.filter((style): style is string => typeof style === 'string')))
+      : [];
+    const primeExampleInstructions = selectedPrimeExampleStyles
+      .map((style) => primeExampleStyleInstructions[style])
+      .filter(Boolean);
+    const generationTemperature = primeNarrativeRequest ? 0.3 : 0.15;
     const issueRequest = /^(?:issue\s*\/\s*problem|problem)\s*[12]?$/i.test(title);
     const taskDutyRequest = /^(?:assigned tasks(?: and responsibilities)?|duties and procedures conformed)$/i.test(title.trim());
     const reflectionRequest = /^(?:self-evaluation|relevancy of the organization|relevancy to course and goals)$/i.test(title.trim());
@@ -354,7 +374,10 @@ export async function POST(request: Request) {
         ? 'For acknowledgements, use related task details to align the wording with the user’s actual experience. Never invent who is being thanked or claim anyone provided support unless the source explicitly names them and their contribution. If no recipient and contribution are supplied, do not express thanks or claim guidance, support, opportunity, growth, or learning; use neutral statements grounded only in supplied work facts, and include a sentence asking the user to add the names and contributions they want acknowledged. Do not treat a role, workplace, branch, or organization as an acknowledgement recipient unless explicitly identified as one.'
         : '',
       primeNarrativeRequest
-        ? 'For the PRIME narrative, follow the subject explicitly described in the current text and focus. If they describe a ceremony, seminar, or other event, use only supplied event details; summarize the date, venue, theme, speakers, activities, and significance when provided, and do not infer missing event facts from placement data. If they describe placement work, summarize the supplied training experience, keeping first- and second-placement organizations, dates, and activities separate. If both event and placement details are requested, keep them distinct and connect them only when the supplied text does. Write a concise academic narrative in the requested point of view and length. Use only supported learning and outcomes; do not invent attendance, topics, skills, teamwork, course connections, feelings, achievements, or gratitude. Do not refer to the student as “the user” or say “the user stated.” If needed facts are missing, briefly state what to add.'
+        ? 'For the PRIME narrative, follow the subject explicitly described in the current text and focus. If they describe a ceremony, seminar, or other event, use only supplied event details; summarize the date, venue, theme, speakers, activities, and significance when provided, and do not infer missing event facts from placement data. If they describe placement work, summarize the supplied training experience, keeping first- and second-placement organizations, dates, and activities separate. If both event and placement details are requested, keep them distinct and connect them only when the supplied text does. Prioritize the student’s own notes, selected details, role, and personal takeaway to make the prose specific to this report. Use selected examples only as organization ideas, never as factual evidence; do not reuse their wording or fill their placeholders with guesses. When interns share event facts, personalize only through individual details the student actually supplied. Do not claim uniqueness through invented opinions or experiences. Write a concise, polished, natural academic narrative in the requested point of view and length. Use only supported learning and outcomes; do not invent attendance, topics, skills, teamwork, course connections, feelings, achievements, or gratitude. Do not refer to the student as “the user” or say “the user stated.” If needed facts are missing, briefly state what to add.'
+        : '',
+      primeNarrativeRequest && primeExampleInstructions.length
+        ? `Selected writing patterns (structure only, not facts): ${primeExampleInstructions.join(' | ')}`
         : '',
       /background|vision|mission|objectives|core values|products and services|services/i.test(title)
         ? 'For organization background and official vision, mission, objectives, core-value, product, or service statements, use only explicit source details. Do not guess from the organization name, location, field, or common practice. If no details are supplied, briefly ask the user for the official or factual information needed.'
@@ -486,7 +509,7 @@ export async function POST(request: Request) {
                   },
                   { role: 'user', content: prompt },
                 ],
-                temperature: 0.15,
+                temperature: generationTemperature,
                 max_tokens: maxOutputTokens,
               }),
               signal: AbortSignal.timeout(providerTimeoutMs),
@@ -553,7 +576,7 @@ export async function POST(request: Request) {
                     ],
                   }],
                   generationConfig: {
-                    temperature: 0.15,
+                    temperature: generationTemperature,
                     maxOutputTokens,
                   },
                 }),
@@ -617,7 +640,7 @@ export async function POST(request: Request) {
                   },
                   { role: 'user', content: prompt },
                 ],
-                temperature: 0.15,
+                temperature: generationTemperature,
                 max_tokens: maxOutputTokens,
                 thinking: { type: 'disabled' },
               }),
@@ -687,7 +710,7 @@ export async function POST(request: Request) {
                     : prompt,
                 },
               ],
-              { temperature: 0.15, max_tokens: maxOutputTokens },
+              { temperature: generationTemperature, max_tokens: maxOutputTokens },
               providerTimeoutMs,
               hasImages ? DEFAULT_CLOUDFLARE_MODEL : undefined,
             );

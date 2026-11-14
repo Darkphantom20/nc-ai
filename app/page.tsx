@@ -359,6 +359,7 @@ type AIGenerationLength = {
 
 type AIGenerationOptions = AIGenerationLength & {
   focus: string;
+  examples?: string[];
 };
 
 function aiText(value: string, maxLength = 1000): string {
@@ -2114,6 +2115,7 @@ export default function Home() {
     options: AIGenerationOptions,
     sourceDetails: Record<string, unknown>,
     exampleText: string,
+    primeExampleStyles: string[] = [],
   ): Promise<string | null> => {
     if (aiGenerating) {
       throw new Error('Another AI generation is already in progress. Wait for it to finish, then try again.');
@@ -2132,6 +2134,7 @@ export default function Home() {
           instructions,
           outputUnit: options.unit,
           outputCount: options.count,
+          ...(primeExampleStyles.length ? { primeExampleStyles } : {}),
         }),
       });
       const result: unknown = await response.json().catch(() => null);
@@ -2207,6 +2210,7 @@ export default function Home() {
     options,
     buildPrimeNarrativeAIContext(form),
     defaultForm.appendices.primeNarrative,
+    options.examples || [],
   );
 
   const generateWeeklyNarrative = async (weekIndex: number, options: AIGenerationOptions): Promise<string | null> => {
@@ -5597,6 +5601,21 @@ export default function Home() {
                       rows={4}
                       onGenerate={(topic) => generatePrimeNarrativeWithAI(form.appendices.primeNarrative, topic)}
                       generating={aiGenerating === 'primeNarrative'}
+                      generationFocusPlaceholder="Add your event details, personal notes, or keywords to make your narrative specific."
+                      generationExamples={[
+                        {
+                          id: 'event-reflection',
+                          title: 'Event or seminar',
+                          description: 'A structure for describing a shared event through your own takeaways.',
+                          sample: 'At [event] on [date], we discussed [specific topic]. One point I want to highlight is [your own takeaway], because [why it mattered to you].',
+                        },
+                        {
+                          id: 'personal-experience',
+                          title: 'Personal experience',
+                          description: 'A structure for connecting an event to your own preparation or placement.',
+                          sample: 'During [specific activity], I [what you personally did]. This connected with my experience at [placement or office] when I [documented task or detail].',
+                        },
+                      ]}
                     />
                   </label>
 
@@ -5796,6 +5815,8 @@ function ExpandableTextarea({
   generating = false,
   generateDisabled = false,
   generateDisabledMessage = '',
+  generationFocusPlaceholder,
+  generationExamples,
 }: {
   title: string;
   value: string;
@@ -5807,12 +5828,20 @@ function ExpandableTextarea({
   generating?: boolean;
   generateDisabled?: boolean;
   generateDisabledMessage?: string;
+  generationFocusPlaceholder?: string;
+  generationExamples?: {
+    id: string;
+    title: string;
+    description: string;
+    sample: string;
+  }[];
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const [draft, setDraft] = useState(value);
   const [generationTopic, setGenerationTopic] = useState('');
   const [generationUnit, setGenerationUnit] = useState<AIGenerationLength['unit']>('paragraphs');
   const [generationCount, setGenerationCount] = useState(1);
+  const [selectedGenerationExamples, setSelectedGenerationExamples] = useState<string[]>([]);
   const [generationError, setGenerationError] = useState('');
 
   useEffect(() => {
@@ -5834,6 +5863,7 @@ function ExpandableTextarea({
     setGenerationTopic('');
     setGenerationUnit('paragraphs');
     setGenerationCount(1);
+    setSelectedGenerationExamples([]);
     setGenerationError('');
     setIsOpen(true);
   };
@@ -5879,7 +5909,7 @@ function ExpandableTextarea({
               placeholder={placeholder || `Enter ${title.toLowerCase()}`}
               aria-label={title}
             />
-            <footer className="space-y-3 border-t border-slate-800 bg-slate-950 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 sm:px-6 sm:pb-4">
+            <footer className={`space-y-3 border-t border-slate-800 bg-slate-950 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 sm:px-6 sm:pb-4 ${generationExamples?.length ? 'max-h-[55dvh] overflow-y-auto' : ''}`}>
               {onGenerate && (
                 <div className="space-y-3">
                   {generateDisabled && generateDisabledMessage && (
@@ -5892,9 +5922,50 @@ function ExpandableTextarea({
                     id={`generation-topic-${title}`}
                     value={generationTopic}
                     onChange={(event) => setGenerationTopic(event.target.value)}
-                    placeholder="Add details to focus on (optional)"
+                    placeholder={generationFocusPlaceholder || 'Add details to focus on (optional)'}
                     className="w-full rounded-xl border border-violet-400/25 bg-violet-500/[0.06] px-3 py-2.5 text-sm text-slate-100 placeholder:text-slate-500 focus:border-violet-400 focus:outline-none"
                   />
+                  {generationExamples && generationExamples.length > 0 && (
+                    <fieldset className="space-y-2">
+                      <legend className="text-[10px] font-bold uppercase tracking-[0.16em] text-violet-300">
+                        Example ideas - select one or both
+                      </legend>
+                      <p className="text-xs leading-5 text-slate-400">
+                        These are writing patterns, not facts. Replace the bracketed prompts with your own details or keywords.
+                      </p>
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        {generationExamples.map((example) => {
+                          const selected = selectedGenerationExamples.includes(example.id);
+                          return (
+                            <label
+                              key={example.id}
+                              className={`cursor-pointer rounded-xl border p-3 transition ${
+                                selected
+                                  ? 'border-violet-400/60 bg-violet-500/10'
+                                  : 'border-slate-700 bg-slate-900/70 hover:border-slate-500'
+                              }`}
+                            >
+                              <span className="flex items-center gap-2 text-sm font-semibold text-slate-100">
+                                <input
+                                  type="checkbox"
+                                  checked={selected}
+                                  onChange={() => setSelectedGenerationExamples((current) => (
+                                    selected
+                                      ? current.filter((id) => id !== example.id)
+                                      : [...current, example.id]
+                                  ))}
+                                  className="accent-violet-400"
+                                />
+                                {example.title}
+                              </span>
+                              <span className="mt-1 block text-xs text-slate-400">{example.description}</span>
+                              <span className="mt-2 block text-xs leading-5 text-slate-300">{example.sample}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </fieldset>
+                  )}
                   <div className="grid gap-3 sm:grid-cols-2">
                     <label className="block text-[10px] font-bold uppercase tracking-[0.16em] text-violet-300">
                       Output type
@@ -5938,6 +6009,9 @@ function ExpandableTextarea({
                           focus: generationTopic,
                           unit: generationUnit,
                           count: generationCount,
+                          ...(selectedGenerationExamples.length
+                            ? { examples: selectedGenerationExamples }
+                            : {}),
                         });
                         if (!generatedText?.trim()) {
                           throw new Error('The AI service returned no text. Please try again.');
