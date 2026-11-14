@@ -5,15 +5,15 @@ import {
   getCloudflareAccounts,
   requestCloudflareChatCompletion,
 } from '../../../../lib/cloudflare-ai';
+import { primeWritingExamples } from '../../../../lib/prime-examples';
 
 export const runtime = 'nodejs';
 
 const providerTimeoutMs = 45_000;
 type Provider = 'groq' | 'gemini' | 'deepseek' | 'cloudflare';
-const primeExampleStyleInstructions: Record<string, string> = {
-  'event-reflection': 'event-report sequence: gather the event name and organizer, date and venue, theme and purpose, each supplied speaker name and role, documented topics or advice, program activities or certificate awarding, and the intern’s own stated takeaway or relevance to internship. Include only items present in the user’s PRIME notes or focus; omit missing items instead of filling the example placeholders. Paraphrase the provided facts in a polished narrative and never copy the sample wording.',
-  'personal-experience': 'internship-experience sequence: introduce the supplied training period and placement organization(s) when available; group concrete recorded duties under the correct placement; then include only skills, lessons, course connections, or personal reflections that the student explicitly supplied. Mention a second placement only when it is enabled and has supporting details. Close with a concise reflection grounded in the student’s own notes. Paraphrase the evidence rather than copying the example sentence.',
-};
+const primeExampleStyleInstructions: Record<string, string> = Object.fromEntries(
+  primeWritingExamples.map(({ id, guidance }) => [id, guidance]),
+);
 
 const exhaustedUntil = new Map<string, number>();
 let providerCursor = 0;
@@ -190,7 +190,12 @@ export async function POST(request: Request) {
       ? Array.from(new Set(rawPrimeExampleStyles.filter((style): style is string => typeof style === 'string')))
       : [];
     const primeExampleInstructions = selectedPrimeExampleStyles
-      .map((style) => primeExampleStyleInstructions[style])
+      .map((style) => {
+        const example = primeWritingExamples.find((candidate) => candidate.id === style);
+        return example
+          ? `${example.guidance}\nFull selected example for structure and wording only, not as factual evidence:\n${example.sample}`
+          : '';
+      })
       .filter(Boolean);
     const generationTemperature = primeNarrativeRequest ? 0.3 : 0.15;
     const issueRequest = /^(?:issue\s*\/\s*problem|problem)\s*[12]?$/i.test(title);
@@ -387,7 +392,7 @@ export async function POST(request: Request) {
         ? 'Write the PRIME narrative in the intern’s first-person voice when describing personal experience. If the focus contains a pasted example or draft, extract and paraphrase its supported event facts and personal points instead of copying sentences. Keep specific names, dates, law numbers, topics, advice, activities, and ceremony details accurate when supplied; organize them into the requested length without replacing them with generic claims. Do not convert a general group statement into an individual claim: change “we/our” to “I/my” only when the source clearly includes the writer and describes the writer’s own experience. Keep speakers’ statements attributed to the speakers. Never claim the writer attended, took an action, received an award, learned something, or felt a particular way unless the submitted details support that claim. If no personal takeaway is supplied, ask the writer to add one instead of fabricating it.'
         : '',
       primeNarrativeRequest && primeExampleInstructions.length
-        ? `Selected writing patterns (structure only, not facts): ${primeExampleInstructions.join(' | ')}`
+        ? `Selected full writing examples (use their organization, transitions, and wording style only; ignore their names, dates, places, laws, activities, and personal claims unless independently supported by this user's PRIME details): ${primeExampleInstructions.join('\n\n')}`
         : '',
       /background|vision|mission|objectives|core values|products and services|services/i.test(title)
         ? 'For organization background and official vision, mission, objectives, core-value, product, or service statements, use only explicit source details. Do not guess from the organization name, location, field, or common practice. If no details are supplied, briefly ask the user for the official or factual information needed.'

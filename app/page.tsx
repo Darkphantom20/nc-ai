@@ -12,6 +12,7 @@ import {
   MONTH_NAMES,
   type MonthlyJournalSummary,
 } from '../lib/monthly-journal';
+import { primeWritingExamples } from '../lib/prime-examples';
 import guideScene from '../05c9cb1a-009e-4c61-ab2f-30d279b5a02c.jpg';
 import memeScene from '../memes.gif';
 import completionScene from '../c0b37494-6751-46ac-9eae-3abd056aa8bf.jpg';
@@ -5609,20 +5610,7 @@ export default function Home() {
                       generating={aiGenerating === 'primeNarrative'}
                       defaultGenerationCount={3}
                       generationFocusPlaceholder="Paste your event notes or example text. Add your own takeaway or reaction if you want it included."
-                      generationExamples={[
-                        {
-                          id: 'event-reflection',
-                          title: 'Event or seminar',
-                          description: 'Use the details you know; leave out anything you cannot verify.',
-                          sample: '[Organizer] held [event name] on [date] at [venue] under the theme [theme]. [Speaker and role] discussed [documented topic or advice]. The program included [documented activity or awarding]. I found [your own takeaway] relevant to my internship because [your stated reason].',
-                        },
-                        {
-                          id: 'personal-experience',
-                          title: 'Internship experience',
-                          description: 'A structure for summarizing your own placements, actual duties, and supported learning.',
-                          sample: 'My training took place at [your office or organization(s)]. At [placement], I [tasks recorded in my report]; at [another placement, if applicable], I [your documented tasks]. These experiences helped me [skill or lesson you personally identified]. Overall, [your own reflection].',
-                        },
-                      ]}
+                      generationExamples={primeWritingExamples}
                     />
                   </label>
 
@@ -5937,10 +5925,10 @@ function ExpandableTextarea({
                   {generationExamples && generationExamples.length > 0 && (
                     <fieldset className="space-y-2">
                       <legend className="text-[10px] font-bold uppercase tracking-[0.16em] text-violet-300">
-                        Example ideas - select one or both
+                        Full examples - select one or both
                       </legend>
                       <p className="text-xs leading-5 text-slate-400">
-                        These are writing patterns, not facts. Replace the bracketed prompts with your own details or keywords.
+                        Check an example to guide the AI's structure and wording. Its names, dates, events, and personal details are examples only; the AI should use your PRIME details instead.
                       </p>
                       <div className="grid gap-2 sm:grid-cols-2">
                         {generationExamples.map((example) => {
