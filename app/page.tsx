@@ -613,88 +613,13 @@ function buildSchoolPlacementAIContext(
 }
 
 function buildPrimeNarrativeAIContext(form: NarrativeForm): Record<string, unknown> {
-  const fieldKeys = Object.keys(aiNarrativeFieldLabels) as AiNarrativeFieldKey[];
   const degreeProgram = userProvidedText(form.degreeProgram, defaultForm.degreeProgram, 200);
   const studentYear = userProvidedText(form.studentYear, defaultForm.studentYear, 60);
-  const trainingDuration = userProvidedText(form.trainingDuration, defaultForm.trainingDuration, 150);
-  const firstOrganization = userProvidedText(
-    form.trainingOrganization,
-    defaultForm.trainingOrganization,
-    200,
-  );
-  const firstLocation = userProvidedText(form.trainingLocation, defaultForm.trainingLocation, 200);
-  const firstPlacementSections = Object.fromEntries(
-    fieldKeys.flatMap((key) => {
-      const value = userProvidedText(form[key], defaultForm[key], 400);
-      return value ? [[aiNarrativeFieldLabels[key], value]] : [];
-    }),
-  );
-  const firstPlacement = {
+  return {
     ...(degreeProgram ? { degreeProgram } : {}),
     ...(studentYear ? { studentYear } : {}),
-    ...(trainingDuration ? { trainingDuration } : {}),
-    ...(firstOrganization ? { organization: firstOrganization } : {}),
-    ...(firstLocation ? { location: firstLocation } : {}),
-    ...(form.schoolPlacement.firstPlacementEndDate
-      ? { endDate: form.schoolPlacement.firstPlacementEndDate }
-      : {}),
-    relatedSections: firstPlacementSections,
-    weeklyJournal: getJournalActivitiesForPlacement(form, false)
-      .slice(-50)
-      .map(({ weekNumber, day, date, accomplishment, hours }) => ({
-        weekNumber,
-        day,
-        date,
-        accomplishment: aiText(accomplishment, 250),
-        hours,
-      })),
-  };
-  if (!form.schoolPlacement.enabled) {
-    return { firstPlacement };
-  }
-
-  const secondOrganization = userProvidedText(
-    form.schoolPlacement.trainingOrganization,
-    defaultForm.schoolPlacement.trainingOrganization,
-    200,
-  );
-  const secondLocation = userProvidedText(
-    form.schoolPlacement.trainingLocation,
-    defaultForm.schoolPlacement.trainingLocation,
-    200,
-  );
-  const secondPlacementSections = Object.fromEntries(
-    fieldKeys.flatMap((key) => {
-      const value = userProvidedText(
-        form.schoolPlacement[key],
-        defaultForm.schoolPlacement[key],
-        400,
-      );
-      return value ? [[aiNarrativeFieldLabels[key], value]] : [];
-    }),
-  );
-  return {
-    firstPlacement,
-    secondPlacement: {
-      ...(secondOrganization ? { organization: secondOrganization } : {}),
-      ...(secondLocation ? { location: secondLocation } : {}),
-      ...(form.schoolPlacement.startDate
-        ? { startDate: form.schoolPlacement.startDate }
-        : {}),
-      relatedSections: secondPlacementSections,
-      weeklyJournal: getJournalActivitiesForPlacement(form, true)
-        .slice(-50)
-        .map(({ weekNumber, day, date, accomplishment, hours }) => ({
-          weekNumber,
-          day,
-          date,
-          accomplishment: aiText(accomplishment, 250),
-          hours,
-        })),
-    },
   };
 }
-
 type ParsedJournalImport = {
   fileName: string;
   weeks: NarrativeJournalWeek[];
@@ -2137,7 +2062,7 @@ export default function Home() {
           title: apiTitle,
           sourceDetails,
           currentText: userProvidedText(currentText, exampleText, 12000),
-          focus: aiText(options.focus, 2000),
+          focus: aiText(options.focus, generationKey === 'primeNarrative' ? 6000 : 2000),
           instructions,
           outputUnit: options.unit,
           outputCount: options.count,
@@ -2213,7 +2138,7 @@ export default function Home() {
     'PRIME Report Narrative',
     'PRIME Report Narrative',
     currentText,
-    'Write a concise academic PRIME narrative that follows the subject and details in the current text or generation focus. If they describe a ceremony, seminar, or other event, summarize the supplied date, venue, theme, speakers, activities, and significance in a clear event-report flow; use placement details only when explicitly relevant. If they describe placement work, introduce the training and summarize each supplied placement separately, then close with only supported learning or outcomes. If both event and placement details are requested, keep them distinct and connect them only when the supplied text does. Condense related facts without losing important names, dates, duties, or placement boundaries. Do not invent attendance, topics, skills, teamwork, values, course connections, feelings, achievements, outcomes, or gratitude.',
+    "Write PRIME only about the pinning ceremony and its seminar: summarize the documented presentations, OJT dos and don'ts, proper attitude and conduct in OJT areas, and how the event prepared or evaluated students for OJT. Do not turn PRIME into a report of the whole OJT experience, placements, daily assignments, or work history. Use first-person reflection only when the student supplied it, and do not invent personal reactions or outcomes.",
     options,
     buildPrimeNarrativeAIContext(form),
     defaultForm.appendices.primeNarrative,
@@ -5609,7 +5534,7 @@ export default function Home() {
                       onGenerate={(topic) => generatePrimeNarrativeWithAI(form.appendices.primeNarrative, topic)}
                       generating={aiGenerating === 'primeNarrative'}
                       defaultGenerationCount={3}
-                      generationFocusPlaceholder="Paste your event notes or example text. Add your own takeaway or reaction if you want it included."
+                      generationFocusPlaceholder="Paste pinning/seminar notes, OJT guidance, and your takeaway. Keep this separate from your general OJT duties."
                       generationExamples={primeWritingExamples}
                     />
                   </label>
