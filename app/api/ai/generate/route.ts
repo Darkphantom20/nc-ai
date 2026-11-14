@@ -100,10 +100,14 @@ function responseValidationError(
   acknowledgementRequest: boolean,
   issueRequest: boolean,
   factualEvidence: string,
+  primeNarrativeRequest = false,
 ): string {
   if (!text) return `${providerName} returned no text.`;
   if (!matchesRequestedLength(text, outputUnit, outputCount)) {
     return `${providerName} did not return exactly ${outputCount} ${outputUnit}.`;
+  }
+  if (primeNarrativeRequest && !/\b(?:I|me|my|mine|we|us|our|ours)\b/i.test(text)) {
+    return `${providerName} did not write the PRIME narrative from the intern’s first-person perspective.`;
   }
   if (issueRequest) {
     const recommendationPattern = /\b(?:to address (?:this|the) challenge|recommend\w*|suggest\w*|proposed solution|solution would|should (?:create|develop|implement|use|establish)|could (?:create|develop|implement|use|establish))\b/i;
@@ -138,8 +142,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Request body must be a JSON object.' }, { status: 400 });
     }
     const title = String(body.title || 'Report section').slice(0, 200);
+    const primeNarrativeRequest = /prime report narrative/i.test(title);
     const currentText = String(body.currentText || '').slice(0, 12000);
-    const focus = String(body.focus || '').trim().slice(0, 2000);
+    const focus = String(body.focus || '').trim().slice(0, primeNarrativeRequest ? 6000 : 2000);
     const instructions = String(body.instructions || '').slice(0, 2000);
     const images: { dataUrl: string; mimeType: string; base64: string }[] = [];
     if (body.imageData !== undefined && body.imageData !== null) {
@@ -169,7 +174,6 @@ export async function POST(request: Request) {
     const monthlyJournalRequest = /^monthly journal (?:activities performed|learning experience)$/i.test(title);
     const monthlyImageJournalRequest = hasImages && monthlyJournalRequest;
     const acknowledgementRequest = /acknowledg(?:e)?ment/i.test(title);
-    const primeNarrativeRequest = /prime report narrative/i.test(title);
     const rawPrimeExampleStyles = body.primeExampleStyles;
     if (rawPrimeExampleStyles !== undefined
       && (!Array.isArray(rawPrimeExampleStyles)
@@ -376,6 +380,9 @@ export async function POST(request: Request) {
       primeNarrativeRequest
         ? 'For the PRIME narrative, follow the subject explicitly described in the current text and focus. If they describe a ceremony, seminar, or other event, gather relevant event facts from those PRIME details: organizer and event name, date, venue, theme or purpose, speaker names and roles, topics or advice, documented activities or awards, and the writer’s stated takeaway or relevance to internship. Use only facts actually supplied, skip missing categories, and do not infer missing event facts from placement data. If they describe internship experience, use the supplied training period, degree/year, placement offices, and dated journal/report details to build a tailored first-person account: introduce the student’s actual placement(s), synthesize documented responsibilities separately for each office, then describe only explicitly supported skills, learning, course application, or personal reflection. Mention two placements only when both contain relevant evidence. Include thanks only when the student identifies whom they want to thank and why. If both event and placement details are requested, keep them distinct and connect them only when the supplied text does. Prioritize the student’s own notes and specific duties. Use selected examples only as organization ideas, never as factual evidence; paraphrase rather than copy their wording and never fill placeholders with guesses. When interns share event facts, distinguish each narrative through that intern’s own supplied placement details and reflections; do not claim uniqueness by inventing experiences. Write polished, natural academic prose in first person for personal experience and the requested length. Do not invent attendance, topics, skills, teamwork, course connections, feelings, achievements, or gratitude. Do not refer to the student as “the user” or say “the user stated.” If needed personal details are missing, briefly state what to add.'
         : '',
+      primeNarrativeRequest
+        ? 'Write the PRIME narrative in the intern’s first-person voice. If the focus contains a pasted example or draft, extract and paraphrase its supported event facts and personal points instead of copying sentences. Keep specific names, dates, law numbers, topics, advice, activities, and ceremony details accurate when supplied; organize them into the requested length without replacing them with generic claims. Rephrase participant statements such as “we” or “our” as “I” or “my” only when they clearly describe the writer’s experience. Keep speakers’ statements attributed to the speakers, and never claim attendance, actions, feelings, beliefs, or personal takeaways beyond what the submitted details support.'
+        : '',
       primeNarrativeRequest && primeExampleInstructions.length
         ? `Selected writing patterns (structure only, not facts): ${primeExampleInstructions.join(' | ')}`
         : '',
@@ -531,6 +538,7 @@ export async function POST(request: Request) {
                 acknowledgementRequest,
                 issueRequest,
                 factualEvidence,
+                primeNarrativeRequest,
               );
               if (!validationError) {
                 text = candidateText;
@@ -604,6 +612,7 @@ export async function POST(request: Request) {
                 acknowledgementRequest,
                 issueRequest,
                 factualEvidence,
+                primeNarrativeRequest,
               );
               if (!validationError) {
                 text = candidateText;
@@ -663,6 +672,7 @@ export async function POST(request: Request) {
                 acknowledgementRequest,
                 issueRequest,
                 factualEvidence,
+                primeNarrativeRequest,
               );
               if (!validationError) {
                 text = candidateText;
@@ -730,6 +740,7 @@ export async function POST(request: Request) {
                 acknowledgementRequest,
                 issueRequest,
                 factualEvidence,
+                primeNarrativeRequest,
               );
               if (!validationError) {
                 text = candidateText;

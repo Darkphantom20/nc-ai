@@ -5607,7 +5607,8 @@ export default function Home() {
                       rows={4}
                       onGenerate={(topic) => generatePrimeNarrativeWithAI(form.appendices.primeNarrative, topic)}
                       generating={aiGenerating === 'primeNarrative'}
-                      generationFocusPlaceholder="Add the event name, organizer, date, venue, theme, speaker/topic, activities, and your own takeaway as available."
+                      defaultGenerationCount={3}
+                      generationFocusPlaceholder="Paste your event notes or example text. Add your own takeaway or reaction if you want it included."
                       generationExamples={[
                         {
                           id: 'event-reflection',
@@ -5823,6 +5824,7 @@ function ExpandableTextarea({
   generateDisabledMessage = '',
   generationFocusPlaceholder,
   generationExamples,
+  defaultGenerationCount = 1,
 }: {
   title: string;
   value: string;
@@ -5841,12 +5843,13 @@ function ExpandableTextarea({
     description: string;
     sample: string;
   }[];
+  defaultGenerationCount?: number;
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const [draft, setDraft] = useState(value);
   const [generationTopic, setGenerationTopic] = useState('');
   const [generationUnit, setGenerationUnit] = useState<AIGenerationLength['unit']>('paragraphs');
-  const [generationCount, setGenerationCount] = useState(1);
+  const [generationCount, setGenerationCount] = useState(defaultGenerationCount);
   const [selectedGenerationExamples, setSelectedGenerationExamples] = useState<string[]>([]);
   const [generationError, setGenerationError] = useState('');
 
@@ -5868,7 +5871,7 @@ function ExpandableTextarea({
     setDraft(value);
     setGenerationTopic('');
     setGenerationUnit('paragraphs');
-    setGenerationCount(1);
+    setGenerationCount(defaultGenerationCount);
     setSelectedGenerationExamples([]);
     setGenerationError('');
     setIsOpen(true);
